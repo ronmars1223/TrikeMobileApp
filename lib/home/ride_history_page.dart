@@ -34,8 +34,9 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
 
     User? user = _auth.currentUser;
     if (user != null) {
-      DatabaseReference historyRef =
-          _database.ref("users/${user.uid}/ride_history");
+      DatabaseReference historyRef = _database.ref(
+        "users/${user.uid}/ride_history",
+      );
 
       try {
         // Get all ride history entries ordered by timestamp (most recent first)
@@ -53,8 +54,9 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
           });
 
           // Sort by timestamp (descending order - newest first)
-          history.sort((a, b) =>
-              (b['timestamp'] as int).compareTo(a['timestamp'] as int));
+          history.sort(
+            (a, b) => (b['timestamp'] as int).compareTo(a['timestamp'] as int),
+          );
 
           setState(() {
             _rideHistory = history;
@@ -81,8 +83,9 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
     if (user != null) {
       try {
         // Reference to the specific ride history entry
-        DatabaseReference rideRef =
-            _database.ref("users/${user.uid}/ride_history/$rideId");
+        DatabaseReference rideRef = _database.ref(
+          "users/${user.uid}/ride_history/$rideId",
+        );
 
         // Delete the ride history entry
         await rideRef.remove();
@@ -115,23 +118,24 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
   void _showDeleteConfirmation(String rideId) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete Ride History'),
-        content: Text('Are you sure you want to delete this ride history?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel'),
+      builder:
+          (context) => AlertDialog(
+            title: Text('Delete Ride History'),
+            content: Text('Are you sure you want to delete this ride history?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _deleteRideHistory(rideId);
+                },
+                child: Text('Delete', style: TextStyle(color: Colors.red)),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _deleteRideHistory(rideId);
-            },
-            child: Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
     );
   }
 
@@ -147,21 +151,21 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
       appBar: AppBar(
         title: Text(
           "Ride History",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: Colors.blue,
         centerTitle: true,
         elevation: 0,
+        iconTheme: IconThemeData(color: Colors.white), // back button color
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : _rideHistory.isEmpty
+
+      body:
+          _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : _rideHistory.isEmpty
               ? _buildEmptyState()
               : _buildHistoryList(),
     );
@@ -172,11 +176,7 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.history,
-            size: 80,
-            color: Colors.grey.shade300,
-          ),
+          Icon(Icons.history, size: 80, color: Colors.grey.shade300),
           SizedBox(height: 16),
           Text(
             'No ride history yet',
@@ -189,9 +189,7 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
           SizedBox(height: 8),
           Text(
             'Your ride history will appear here',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-            ),
+            style: TextStyle(color: Colors.grey.shade600),
           ),
           SizedBox(height: 24),
           ElevatedButton.icon(
@@ -252,8 +250,11 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.access_time,
-                                size: 16, color: Colors.grey.shade600),
+                            Icon(
+                              Icons.access_time,
+                              size: 16,
+                              color: Colors.grey.shade600,
+                            ),
                             SizedBox(width: 6),
                             Text(
                               _formatTimestamp(ride['timestamp']),
@@ -265,8 +266,10 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
                           ],
                         ),
                         Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.green.shade100,
                             borderRadius: BorderRadius.circular(12),
@@ -359,9 +362,7 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
                               ),
                               Text(
                                 ride['pickup'] ?? 'Unknown location',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                style: TextStyle(fontWeight: FontWeight.w500),
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 2,
                               ),
@@ -421,9 +422,7 @@ class _RideHistoryPageState extends State<RideHistoryPage> {
                               ),
                               Text(
                                 ride['destination'] ?? 'Unknown location',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                style: TextStyle(fontWeight: FontWeight.w500),
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 2,
                               ),

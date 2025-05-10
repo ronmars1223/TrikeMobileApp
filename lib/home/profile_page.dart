@@ -157,7 +157,8 @@ class _ProfilePageState extends State<ProfilePage>
       await _storeLocationData(locationData);
 
       print(
-          "Location updated: ${locationData.latitude}, ${locationData.longitude}");
+        "Location updated: ${locationData.latitude}, ${locationData.longitude}",
+      );
     } catch (e) {
       print("Error getting location: $e");
     }
@@ -182,8 +183,9 @@ class _ProfilePageState extends State<ProfilePage>
         });
 
         // Update the user's current location
-        final userCurrentLocationRef =
-            _database.ref("users/${user.uid}/current_location");
+        final userCurrentLocationRef = _database.ref(
+          "users/${user.uid}/current_location",
+        );
         await userCurrentLocationRef.set({
           'latitude': locationData.latitude,
           'longitude': locationData.longitude,
@@ -243,13 +245,14 @@ class _ProfilePageState extends State<ProfilePage>
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
-      builder: (context) => FractionallySizedBox(
-        heightFactor: 0.9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-          child: RideHistoryPage(),
-        ),
-      ),
+      builder:
+          (context) => FractionallySizedBox(
+            heightFactor: 0.9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+              child: RideHistoryPage(),
+            ),
+          ),
     );
   }
 
@@ -317,13 +320,7 @@ class _ProfilePageState extends State<ProfilePage>
               ),
             ),
             SizedBox(height: 8),
-            Text(
-              email,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.black54,
-              ),
-            ),
+            Text(email, style: TextStyle(fontSize: 16, color: Colors.black54)),
           ],
         ),
       ),
@@ -472,9 +469,10 @@ class _ProfilePageState extends State<ProfilePage>
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: _isTrackingLocation
-                        ? Colors.green.shade100
-                        : Colors.red.shade100,
+                    color:
+                        _isTrackingLocation
+                            ? Colors.green.shade100
+                            : Colors.red.shade100,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
@@ -482,9 +480,10 @@ class _ProfilePageState extends State<ProfilePage>
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: _isTrackingLocation
-                          ? Colors.green.shade800
-                          : Colors.red.shade800,
+                      color:
+                          _isTrackingLocation
+                              ? Colors.green.shade800
+                              : Colors.red.shade800,
                     ),
                   ),
                 ),
@@ -492,27 +491,39 @@ class _ProfilePageState extends State<ProfilePage>
             ),
             SizedBox(height: 16),
             if (_currentLocation != null) ...[
-              _buildLocationDetailRow('Latitude',
-                  _currentLocation!.latitude?.toStringAsFixed(6) ?? 'N/A'),
-              _buildLocationDetailRow('Longitude',
-                  _currentLocation!.longitude?.toStringAsFixed(6) ?? 'N/A'),
-              _buildLocationDetailRow('Accuracy',
-                  '${_currentLocation!.accuracy?.toStringAsFixed(2) ?? 'N/A'} m'),
-              _buildLocationDetailRow('Speed',
-                  '${_currentLocation!.speed?.toStringAsFixed(2) ?? 'N/A'} m/s'),
+              _buildLocationDetailRow(
+                'Latitude',
+                _currentLocation!.latitude?.toStringAsFixed(6) ?? 'N/A',
+              ),
+              _buildLocationDetailRow(
+                'Longitude',
+                _currentLocation!.longitude?.toStringAsFixed(6) ?? 'N/A',
+              ),
+              _buildLocationDetailRow(
+                'Accuracy',
+                '${_currentLocation!.accuracy?.toStringAsFixed(2) ?? 'N/A'} m',
+              ),
+              _buildLocationDetailRow(
+                'Speed',
+                '${_currentLocation!.speed?.toStringAsFixed(2) ?? 'N/A'} m/s',
+              ),
               SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isTrackingLocation
-                          ? _stopLocationTracking
-                          : _startLocationTracking,
+                      onPressed:
+                          _isTrackingLocation
+                              ? _stopLocationTracking
+                              : _startLocationTracking,
                       icon: Icon(
-                          _isTrackingLocation ? Icons.pause : Icons.play_arrow),
-                      label: Text(_isTrackingLocation
-                          ? 'Stop Tracking'
-                          : 'Start Tracking'),
+                        _isTrackingLocation ? Icons.pause : Icons.play_arrow,
+                      ),
+                      label: Text(
+                        _isTrackingLocation
+                            ? 'Stop Tracking'
+                            : 'Start Tracking',
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor:
                             _isTrackingLocation ? Colors.red : Colors.green,
@@ -530,18 +541,11 @@ class _ProfilePageState extends State<ProfilePage>
               Center(
                 child: Column(
                   children: [
-                    Icon(
-                      Icons.location_off,
-                      size: 48,
-                      color: Colors.grey,
-                    ),
+                    Icon(Icons.location_off, size: 48, color: Colors.grey),
                     SizedBox(height: 8),
                     Text(
                       'Location data not available',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
                     ),
                     SizedBox(height: 16),
                     ElevatedButton.icon(
@@ -551,8 +555,10 @@ class _ProfilePageState extends State<ProfilePage>
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
-                        padding:
-                            EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        padding: EdgeInsets.symmetric(
+                          vertical: 12,
+                          horizontal: 16,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -650,10 +656,7 @@ class _ProfilePageState extends State<ProfilePage>
                       SizedBox(height: 4),
                       Text(
                         "Track and review your past rides",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white70,
-                        ),
+                        style: TextStyle(fontSize: 14, color: Colors.white70),
                       ),
                     ],
                   ),
@@ -675,27 +678,28 @@ class _ProfilePageState extends State<ProfilePage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-              ),
-            )
-          : SafeArea(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(height: 20),
-                    _buildProfileSection(),
-                    _buildProfileDetails(),
-                    _buildLocationInfo(), // Add the location section
-                    _buildRideHistoryButton(),
-                  ],
+      body:
+          _isLoading
+              ? Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                ),
+              )
+              : SafeArea(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(height: 20),
+                      _buildProfileSection(),
+                      _buildProfileDetails(),
+                      _buildLocationInfo(), // Add the location section
+                      _buildRideHistoryButton(),
+                    ],
+                  ),
                 ),
               ),
-            ),
     );
   }
 }

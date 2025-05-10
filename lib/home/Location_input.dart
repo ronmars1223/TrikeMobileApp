@@ -17,10 +17,7 @@ class LocationInputPage extends StatefulWidget {
   final Function(String, String, LatLng?, LatLng?) onLocationConfirmed;
   final Map<String, dynamic>? driverData;
 
-  LocationInputPage({
-    required this.onLocationConfirmed,
-    this.driverData,
-  });
+  LocationInputPage({required this.onLocationConfirmed, this.driverData});
 
   @override
   _LocationInputPageState createState() => _LocationInputPageState();
@@ -175,10 +172,14 @@ class _LocationInputPageState extends State<LocationInputPage> {
               mainText: value['destination'] ?? '',
               secondaryText: "Recent trip",
               description: value['destination'] ?? '',
-              coordinates: value['destination_lat'] != null &&
-                      value['destination_lng'] != null
-                  ? LatLng(value['destination_lat'], value['destination_lng'])
-                  : LocationSearchService.defaultCoordinates,
+              coordinates:
+                  value['destination_lat'] != null &&
+                          value['destination_lng'] != null
+                      ? LatLng(
+                        value['destination_lat'],
+                        value['destination_lng'],
+                      )
+                      : LocationSearchService.defaultCoordinates,
               isRecent: true,
             ),
           );
@@ -222,7 +223,8 @@ class _LocationInputPageState extends State<LocationInputPage> {
 
       // Get initial position
       Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        desiredAccuracy: LocationAccuracy.high,
+      );
 
       // Update location with initial position
       _updateLocationFromPosition(position);
@@ -243,8 +245,10 @@ class _LocationInputPageState extends State<LocationInputPage> {
   void _updateLocationFromPosition(Position position) async {
     try {
       // Get address from coordinates
-      List<Placemark> placemarks =
-          await placemarkFromCoordinates(position.latitude, position.longitude);
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
 
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks[0];
@@ -318,13 +322,15 @@ class _LocationInputPageState extends State<LocationInputPage> {
           final shuffledPopular = List<LocalPrediction>.from(_popularPlaces)
             ..shuffle(random);
 
-          _destinationPredictions
-              .addAll(shuffledPopular.take(5 - _destinationPredictions.length));
+          _destinationPredictions.addAll(
+            shuffledPopular.take(5 - _destinationPredictions.length),
+          );
         }
 
         // Add a "search more" option at the end
-        _destinationPredictions
-            .add(LocationSuggestionService.getSearchMoreOption());
+        _destinationPredictions.add(
+          LocationSuggestionService.getSearchMoreOption(),
+        );
 
         _isLoadingDestination = false;
       });
@@ -339,7 +345,10 @@ class _LocationInputPageState extends State<LocationInputPage> {
     // Step 1: Check local suggestions first (fast response)
     List<LocalPrediction> localResults =
         LocationSuggestionService.filterLocalSuggestions(
-            query, _recentPlaces, _popularPlaces);
+          query,
+          _recentPlaces,
+          _popularPlaces,
+        );
 
     // Limit to top results from local suggestions
     if (localResults.length > 3) {
@@ -370,7 +379,8 @@ class _LocationInputPageState extends State<LocationInputPage> {
       });
 
       print(
-          "📍 Found ${_destinationPredictions.length} combined predictions for '$query'");
+        "📍 Found ${_destinationPredictions.length} combined predictions for '$query'",
+      );
     } catch (e) {
       print("❌ Error searching locations: $e");
       setState(() {
@@ -387,7 +397,10 @@ class _LocationInputPageState extends State<LocationInputPage> {
     // Step 1: Check local suggestions first
     List<LocalPrediction> localResults =
         LocationSuggestionService.filterLocalSuggestions(
-            query, _recentPlaces, _popularPlaces);
+          query,
+          _recentPlaces,
+          _popularPlaces,
+        );
 
     // Limit to top results
     if (localResults.length > 3) {
@@ -452,7 +465,8 @@ class _LocationInputPageState extends State<LocationInputPage> {
     });
 
     print(
-        "Destination coordinates set: ${prediction.coordinates.latitude}, ${prediction.coordinates.longitude}");
+      "Destination coordinates set: ${prediction.coordinates.latitude}, ${prediction.coordinates.longitude}",
+    );
   }
 
   // MARK: - Action Methods
@@ -490,7 +504,9 @@ class _LocationInputPageState extends State<LocationInputPage> {
   Future<void> _geocodeDestination(String address) async {
     // Try to match text with our local predictions first
     LatLng? coordinates = LocationSearchService.matchTextWithPredictions(
-        address, [..._recentPlaces, ..._popularPlaces]);
+      address,
+      [..._recentPlaces, ..._popularPlaces],
+    );
 
     if (coordinates != null) {
       setState(() {
@@ -511,7 +527,9 @@ class _LocationInputPageState extends State<LocationInputPage> {
   Future<void> _geocodePickup(String address) async {
     // Try to match with local places first
     LatLng? coordinates = LocationSearchService.matchTextWithPredictions(
-        address, [..._recentPlaces, ..._popularPlaces]);
+      address,
+      [..._recentPlaces, ..._popularPlaces],
+    );
 
     if (coordinates != null) {
       setState(() {
@@ -562,37 +580,39 @@ class _LocationInputPageState extends State<LocationInputPage> {
           style: TextStyle(fontSize: 15),
           decoration: InputDecoration(
             border: InputBorder.none,
-            prefixIcon: isLoading
-                ? Container(
-                    width: 20,
-                    height: 20,
-                    padding: EdgeInsets.all(10),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(iconColor),
-                    ),
-                  )
-                : Icon(icon, color: iconColor),
+            prefixIcon:
+                isLoading
+                    ? Container(
+                      width: 20,
+                      height: 20,
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                      ),
+                    )
+                    : Icon(icon, color: iconColor),
             hintText: hintText,
             hintStyle: TextStyle(color: Colors.grey.shade400),
             contentPadding: EdgeInsets.symmetric(vertical: 16),
-            suffixIcon: controller.text.isNotEmpty
-                ? IconButton(
-                    icon: Icon(Icons.clear, color: Colors.grey),
-                    onPressed: () {
-                      controller.clear();
-                      setState(() {
-                        if (controller == _pickupController) {
-                          _pickupPredictions = [];
-                          _pickupCoordinates = null;
-                        } else {
-                          _destinationPredictions = [];
-                          _destinationCoordinates = null;
-                        }
-                      });
-                    },
-                  )
-                : null,
+            suffixIcon:
+                controller.text.isNotEmpty
+                    ? IconButton(
+                      icon: Icon(Icons.clear, color: Colors.grey),
+                      onPressed: () {
+                        controller.clear();
+                        setState(() {
+                          if (controller == _pickupController) {
+                            _pickupPredictions = [];
+                            _pickupCoordinates = null;
+                          } else {
+                            _destinationPredictions = [];
+                            _destinationCoordinates = null;
+                          }
+                        });
+                      },
+                    )
+                    : null,
           ),
           onTap: () {
             // When destination field is tapped, show recent/popular places
@@ -659,13 +679,15 @@ class _LocationInputPageState extends State<LocationInputPage> {
                     markerId: MarkerId('pickup'),
                     position: _pickupCoordinates!,
                     icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueBlue),
+                      BitmapDescriptor.hueBlue,
+                    ),
                   ),
                   Marker(
                     markerId: MarkerId('destination'),
                     position: _destinationCoordinates!,
                     icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueRed),
+                      BitmapDescriptor.hueRed,
+                    ),
                   ),
                 },
                 polylines: {
@@ -748,8 +770,10 @@ class _LocationInputPageState extends State<LocationInputPage> {
                       ),
                     ),
                     IconButton(
-                      constraints:
-                          BoxConstraints.tightFor(width: 32, height: 32),
+                      constraints: BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
                       padding: EdgeInsets.zero,
                       icon: Icon(Icons.close, color: Colors.white, size: 20),
                       onPressed: () => Navigator.pop(context),
@@ -762,8 +786,12 @@ class _LocationInputPageState extends State<LocationInputPage> {
               Flexible(
                 fit: FlexFit.loose,
                 child: SingleChildScrollView(
-                  padding:
-                      EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 0),
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 12,
+                    bottom: 0,
+                  ),
                   physics: ClampingScrollPhysics(),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -794,11 +822,15 @@ class _LocationInputPageState extends State<LocationInputPage> {
                               ),
                               child: IconButton(
                                 constraints: BoxConstraints.tightFor(
-                                    width: 36, height: 36),
+                                  width: 36,
+                                  height: 36,
+                                ),
                                 padding: EdgeInsets.zero,
                                 iconSize: 18,
-                                icon:
-                                    Icon(Icons.gps_fixed, color: Colors.white),
+                                icon: Icon(
+                                  Icons.gps_fixed,
+                                  color: Colors.white,
+                                ),
                                 onPressed: _useCurrentLocation,
                                 tooltip: 'Use current location',
                               ),
@@ -852,11 +884,13 @@ class _LocationInputPageState extends State<LocationInputPage> {
                       // This SizedBox creates space for the predictions to appear
                       // The height will depend on whether predictions are showing
                       SizedBox(
-                          height: _destinationPredictions.isNotEmpty
-                              ? (_destinationPredictions.length > 3
-                                  ? 230
-                                  : _destinationPredictions.length * 75)
-                              : 0),
+                        height:
+                            _destinationPredictions.isNotEmpty
+                                ? (_destinationPredictions.length > 3
+                                    ? 230
+                                    : _destinationPredictions.length * 75)
+                                : 0,
+                      ),
 
                       SizedBox(height: 16),
 
@@ -883,6 +917,7 @@ class _LocationInputPageState extends State<LocationInputPage> {
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                         ),

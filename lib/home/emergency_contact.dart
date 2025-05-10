@@ -347,15 +347,48 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                     barrierDismissible: false,
                     builder:
                         (context) => AlertDialog(
-                          title: const Text('Add Emergency Contact'),
-                          content: _buildContactForm(),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          title: const Text(
+                            'Add Emergency Contact',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 20,
+                          ),
+                          content: SingleChildScrollView(
+                            child: _buildContactForm(),
+                          ),
+                          actionsPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          actionsAlignment: MainAxisAlignment.end,
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               child: const Text('CANCEL'),
                             ),
-                            TextButton(
+                            ElevatedButton(
                               onPressed: _addContact,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               child: const Text('ADD'),
                             ),
                           ],
@@ -363,7 +396,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                   );
                 },
                 backgroundColor: Colors.red,
-                child: const Icon(Icons.add),
+                child: const Icon(Icons.add, color: Colors.white),
               ),
     );
   }
