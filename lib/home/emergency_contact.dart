@@ -10,9 +10,10 @@ class EmergencyContactsPage extends StatefulWidget {
 
 class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
   final FirebaseDatabase _database = FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL:
-          'https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/');
+    app: Firebase.app(),
+    databaseURL:
+        'https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/',
+  );
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   List<Map<String, dynamic>> contacts = [];
@@ -97,8 +98,9 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
         });
 
         // Reference directly to the user's emergency contacts node using UID
-        DatabaseReference contactsRef =
-            _database.ref("emergency_contacts/${user!.uid}");
+        DatabaseReference contactsRef = _database.ref(
+          "emergency_contacts/${user!.uid}",
+        );
 
         // Use push() to get a new unique key
         DatabaseReference newContactRef = contactsRef.push();
@@ -234,125 +236,135 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Emergency Contacts'),
+        title: const Text(
+          'Emergency Contacts',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        iconTheme: const IconThemeData(
+          color: Colors.white, // back button color
+        ),
         backgroundColor: Colors.red,
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : user == null
-              ? Center(
-                  child: Text('Please log in to view emergency contacts'),
-                )
+
+      body:
+          _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : user == null
+              ? Center(child: Text('Please log in to view emergency contacts'))
               : contacts.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+              ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.contact_phone,
+                      size: 60,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No emergency contacts added yet',
+                      style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Tap the + button to add a contact',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              )
+              : ListView.builder(
+                itemCount: contacts.length,
+                itemBuilder: (context, index) {
+                  final contact = contacts[index];
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    elevation: 2,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.red[100],
+                        child: const Icon(Icons.person, color: Colors.red),
+                      ),
+                      title: Text(
+                        contact['name'],
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Row(
                         children: [
-                          Icon(Icons.contact_phone,
-                              size: 60, color: Colors.grey[400]),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No emergency contacts added yet',
-                            style: TextStyle(
-                              fontSize: 18,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Tap the + button to add a contact',
-                            style: TextStyle(color: Colors.grey),
-                          ),
+                          const Icon(Icons.phone, size: 16, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(contact['phone']),
                         ],
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: contacts.length,
-                      itemBuilder: (context, index) {
-                        final contact = contacts[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          elevation: 2,
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: Colors.red[100],
-                              child:
-                                  const Icon(Icons.person, color: Colors.red),
-                            ),
-                            title: Text(
-                              contact['name'],
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Row(
-                              children: [
-                                const Icon(Icons.phone,
-                                    size: 16, color: Colors.grey),
-                                const SizedBox(width: 4),
-                                Text(contact['phone']),
-                              ],
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Delete Contact'),
-                                    content: Text(
-                                        'Are you sure you want to delete ${contact['name']} from your emergency contacts?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('CANCEL'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () {
-                                          _deleteContact(contact['id']);
-                                          Navigator.pop(context);
-                                        },
-                                        child: const Text('DELETE',
-                                            style:
-                                                TextStyle(color: Colors.red)),
-                                      ),
-                                    ],
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder:
+                                (context) => AlertDialog(
+                                  title: const Text('Delete Contact'),
+                                  content: Text(
+                                    'Are you sure you want to delete ${contact['name']} from your emergency contacts?',
                                   ),
-                                );
-                              },
-                            ),
-                          ),
-                        );
-                      },
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('CANCEL'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        _deleteContact(contact['id']);
+                                        Navigator.pop(context);
+                                      },
+                                      child: const Text(
+                                        'DELETE',
+                                        style: TextStyle(color: Colors.red),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                          );
+                        },
+                      ),
                     ),
-      floatingActionButton: user == null || _isLoading
-          ? null
-          : FloatingActionButton(
-              onPressed: () {
-                nameController.clear();
-                numberController.clear();
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Add Emergency Contact'),
-                    content: _buildContactForm(),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('CANCEL'),
-                      ),
-                      TextButton(
-                        onPressed: _addContact,
-                        child: const Text('ADD'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              backgroundColor: Colors.red,
-              child: const Icon(Icons.add),
-            ),
+                  );
+                },
+              ),
+      floatingActionButton:
+          user == null || _isLoading
+              ? null
+              : FloatingActionButton(
+                onPressed: () {
+                  nameController.clear();
+                  numberController.clear();
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder:
+                        (context) => AlertDialog(
+                          title: const Text('Add Emergency Contact'),
+                          content: _buildContactForm(),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('CANCEL'),
+                            ),
+                            TextButton(
+                              onPressed: _addContact,
+                              child: const Text('ADD'),
+                            ),
+                          ],
+                        ),
+                  );
+                },
+                backgroundColor: Colors.red,
+                child: const Icon(Icons.add),
+              ),
     );
   }
 }
