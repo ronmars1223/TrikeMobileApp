@@ -23,12 +23,17 @@ class LocationInputPage extends StatefulWidget {
   _LocationInputPageState createState() => _LocationInputPageState();
 }
 
-class _LocationInputPageState extends State<LocationInputPage> {
+class _LocationInputPageState extends State<LocationInputPage>
+    with SingleTickerProviderStateMixin {
   // Controllers and focus nodes
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _destinationController = TextEditingController();
   final FocusNode _pickupFocusNode = FocusNode();
   final FocusNode _destinationFocusNode = FocusNode();
+
+  // Animation controller for smoother transitions
+  late AnimationController _suggestionsAnimationController;
+  late Animation<double> _suggestionsAnimation;
 
   // Coordinates for the selected locations
   LatLng? _pickupCoordinates;
@@ -37,6 +42,8 @@ class _LocationInputPageState extends State<LocationInputPage> {
   // State flags
   bool _isLoadingDestination = false;
   bool _loadingCurrentLocation = false;
+  bool _shouldShowSuggestions = false;
+  bool _locationSelectionInProgress = false;
 
   // Place predictions
   List<LocalPrediction> _pickupPredictions = [];
@@ -55,6 +62,17 @@ class _LocationInputPageState extends State<LocationInputPage> {
   void initState() {
     super.initState();
     print("🚀 LocationInputPage initialized");
+
+    // Initialize animation controller for smooth transitions
+    _suggestionsAnimationController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 200),
+    );
+    _suggestionsAnimation = CurvedAnimation(
+      parent: _suggestionsAnimationController,
+      curve: Curves.easeInOut,
+    );
+
     _startLocationTracking();
     _fetchRideHistory();
     _setupTextFieldListeners();
@@ -76,6 +94,7 @@ class _LocationInputPageState extends State<LocationInputPage> {
     _destinationFocusNode.dispose();
     _debounce?.cancel();
     _positionStream?.cancel();
+    _suggestionsAnimationController.dispose();
     super.dispose();
   }
 
@@ -85,17 +104,22 @@ class _LocationInputPageState extends State<LocationInputPage> {
     // Destination input field listener with reduced debounce time
     _destinationController.addListener(() {
       if (_debounce?.isActive ?? false) _debounce!.cancel();
-      _debounce = Timer(const Duration(milliseconds: 300), () {
-        if (_destinationController.text.length > 1) {
-          // Reduced minimum length to 2 characters
-          print("Searching for: ${_destinationController.text}");
-          _searchDestination(_destinationController.text);
-        } else {
-          setState(() {
-            _destinationPredictions = [];
-          });
-        }
-      });
+
+      // Only show suggestions if we're not in the middle of a selection
+      if (!_locationSelectionInProgress) {
+        _debounce = Timer(const Duration(milliseconds: 300), () {
+          if (_destinationController.text.length > 1) {
+            // Reduced minimum length to 2 characters
+            print("Searching for: ${_destinationController.text}");
+            _searchDestination(_destinationController.text);
+          } else if (_destinationFocusNode.hasFocus) {
+            // Show recent/popular if field has focus but minimal text
+            _showRecentAndPopularPlaces();
+          } else {
+            _hideSuggestions();
+          }
+        });
+      }
     });
 
     _pickupController.addListener(() {
@@ -124,21 +148,22 @@ class _LocationInputPageState extends State<LocationInputPage> {
 
     _destinationFocusNode.addListener(() {
       if (_destinationFocusNode.hasFocus) {
-        // Show recent and popular places when field gets focus
-        if (_destinationController.text.length <= 1) {
-          _showRecentAndPopularPlaces();
-        } else {
-          // Or filter based on current text
-          _searchDestination(_destinationController.text);
+        // Don't show suggestions if we just selected a location
+        if (!_locationSelectionInProgress) {
+          // Show recent and popular places when field gets focus
+          if (_destinationController.text.length <= 1) {
+            _showRecentAndPopularPlaces();
+          } else {
+            // Or filter based on current text
+            _searchDestination(_destinationController.text);
+          }
         }
-      }
-      if (!_destinationFocusNode.hasFocus) {
+      } else {
         // Delay hiding predictions to allow for selection
         Future.delayed(Duration(milliseconds: 200), () {
-          if (!_destinationFocusNode.hasFocus) {
-            setState(() {
-              _destinationPredictions = [];
-            });
+          if (!_destinationFocusNode.hasFocus &&
+              !_locationSelectionInProgress) {
+            _hideSuggestions();
           }
         });
       }
@@ -302,6 +327,26 @@ class _LocationInputPageState extends State<LocationInputPage> {
     _startLocationTracking();
   }
 
+  // MARK: - Suggestions Display Methods
+
+  void _displaySuggestions() {
+    setState(() {
+      _shouldShowSuggestions = true;
+    });
+    _suggestionsAnimationController.forward();
+  }
+
+  void _hideSuggestions() {
+    _suggestionsAnimationController.reverse().then((_) {
+      if (mounted) {
+        setState(() {
+          _shouldShowSuggestions = false;
+          _destinationPredictions = [];
+        });
+      }
+    });
+  }
+
   // MARK: - Place Search Methods
 
   void _showRecentAndPopularPlaces() {
@@ -311,33 +356,38 @@ class _LocationInputPageState extends State<LocationInputPage> {
 
     // Simulate network delay for a more natural feel
     Future.delayed(Duration(milliseconds: 300), () {
-      setState(() {
-        // First show recent places, then popular places
-        _destinationPredictions = [..._recentPlaces];
+      if (mounted) {
+        setState(() {
+          // First show recent places, then popular places
+          _destinationPredictions = [..._recentPlaces];
 
-        // Add some popular places if we don't have enough recents
-        if (_destinationPredictions.length < 5) {
-          // Get random popular places to simulate variety
-          final random = math.Random();
-          final shuffledPopular = List<LocalPrediction>.from(_popularPlaces)
-            ..shuffle(random);
+          // Add some popular places if we don't have enough recents
+          if (_destinationPredictions.length < 5) {
+            // Get random popular places to simulate variety
+            final random = math.Random();
+            final shuffledPopular = List<LocalPrediction>.from(_popularPlaces)
+              ..shuffle(random);
 
-          _destinationPredictions.addAll(
-            shuffledPopular.take(5 - _destinationPredictions.length),
+            _destinationPredictions.addAll(
+              shuffledPopular.take(5 - _destinationPredictions.length),
+            );
+          }
+
+          // Add a "search more" option at the end
+          _destinationPredictions.add(
+            LocationSuggestionService.getSearchMoreOption(),
           );
-        }
 
-        // Add a "search more" option at the end
-        _destinationPredictions.add(
-          LocationSuggestionService.getSearchMoreOption(),
-        );
-
-        _isLoadingDestination = false;
-      });
+          _isLoadingDestination = false;
+          _displaySuggestions();
+        });
+      }
     });
   }
 
   Future<void> _searchDestination(String query) async {
+    if (_locationSelectionInProgress) return;
+
     setState(() {
       _isLoadingDestination = true;
     });
@@ -355,37 +405,56 @@ class _LocationInputPageState extends State<LocationInputPage> {
       localResults = localResults.sublist(0, 3);
     }
 
-    setState(() {
-      _destinationPredictions = localResults;
-    });
+    // Start showing suggestions with local results first
+    if (mounted) {
+      setState(() {
+        _destinationPredictions = localResults;
+        if (_destinationPredictions.isNotEmpty) {
+          _displaySuggestions();
+        }
+      });
+    }
 
     // Step 2: Search online for more results
     try {
       List<LocalPrediction> searchResults =
           await LocationSearchService.searchLocations(query);
 
-      setState(() {
-        _destinationPredictions = localResults;
-        if (searchResults.isNotEmpty) {
-          _destinationPredictions.addAll(searchResults);
-        }
+      if (mounted) {
+        setState(() {
+          if (localResults.isNotEmpty) {
+            _destinationPredictions = localResults;
+          }
 
-        // Cap at 7 total results for UX
-        if (_destinationPredictions.length > 7) {
-          _destinationPredictions = _destinationPredictions.sublist(0, 7);
-        }
+          if (searchResults.isNotEmpty) {
+            _destinationPredictions.addAll(searchResults);
+          }
 
-        _isLoadingDestination = false;
-      });
+          // Cap at 7 total results for UX
+          if (_destinationPredictions.length > 7) {
+            _destinationPredictions = _destinationPredictions.sublist(0, 7);
+          }
 
-      print(
-        "📍 Found ${_destinationPredictions.length} combined predictions for '$query'",
-      );
+          _isLoadingDestination = false;
+
+          if (_destinationPredictions.isNotEmpty) {
+            _displaySuggestions();
+          } else {
+            _hideSuggestions();
+          }
+        });
+
+        print(
+          "📍 Found ${_destinationPredictions.length} combined predictions for '$query'",
+        );
+      }
     } catch (e) {
       print("❌ Error searching locations: $e");
-      setState(() {
-        _isLoadingDestination = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingDestination = false;
+        });
+      }
     }
   }
 
@@ -439,10 +508,12 @@ class _LocationInputPageState extends State<LocationInputPage> {
 
   void _selectPickupPlace(LocalPrediction prediction) {
     setState(() {
+      _locationSelectionInProgress = true;
       _pickupController.text =
           "${prediction.mainText}, ${prediction.secondaryText}";
       _pickupCoordinates = prediction.coordinates;
       _pickupPredictions = [];
+      _locationSelectionInProgress = false;
     });
 
     // Stop location tracking when a manual location is selected
@@ -450,18 +521,34 @@ class _LocationInputPageState extends State<LocationInputPage> {
   }
 
   void _selectDestinationPlace(LocalPrediction prediction) {
+    // Flag that we're selecting to prevent suggestion flicker
+    setState(() {
+      _locationSelectionInProgress = true;
+    });
+
     // Check if this is the "Search more" option
     if (prediction.isSearchMore) {
       // Just focus on the input field to let user search more specific location
       FocusScope.of(context).requestFocus(_destinationFocusNode);
+      setState(() {
+        _locationSelectionInProgress = false;
+      });
       return;
     }
 
-    setState(() {
-      _destinationController.text =
-          "${prediction.mainText}, ${prediction.secondaryText}";
-      _destinationCoordinates = prediction.coordinates;
-      _destinationPredictions = [];
+    // First hide the suggestions
+    _hideSuggestions();
+
+    // Then set the selected place after the animation completes
+    Future.delayed(Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _destinationController.text =
+              "${prediction.mainText}, ${prediction.secondaryText}";
+          _destinationCoordinates = prediction.coordinates;
+          _locationSelectionInProgress = false;
+        });
+      }
     });
 
     print(
@@ -606,7 +693,7 @@ class _LocationInputPageState extends State<LocationInputPage> {
                             _pickupPredictions = [];
                             _pickupCoordinates = null;
                           } else {
-                            _destinationPredictions = [];
+                            _hideSuggestions();
                             _destinationCoordinates = null;
                           }
                         });
@@ -617,10 +704,12 @@ class _LocationInputPageState extends State<LocationInputPage> {
           onTap: () {
             // When destination field is tapped, show recent/popular places
             if (controller == _destinationController) {
-              if (controller.text.length <= 1) {
-                _showRecentAndPopularPlaces();
-              } else {
-                _searchDestination(controller.text);
+              if (!_locationSelectionInProgress) {
+                if (controller.text.length <= 1) {
+                  _showRecentAndPopularPlaces();
+                } else {
+                  _searchDestination(controller.text);
+                }
               }
             } else if (controller == _pickupController &&
                 controller.text.length > 2) {
@@ -884,12 +973,7 @@ class _LocationInputPageState extends State<LocationInputPage> {
                       // This SizedBox creates space for the predictions to appear
                       // The height will depend on whether predictions are showing
                       SizedBox(
-                        height:
-                            _destinationPredictions.isNotEmpty
-                                ? (_destinationPredictions.length > 3
-                                    ? 230
-                                    : _destinationPredictions.length * 75)
-                                : 0,
+                        height: 0, // No longer needed - we're using an overlay
                       ),
 
                       SizedBox(height: 16),
@@ -930,53 +1014,73 @@ class _LocationInputPageState extends State<LocationInputPage> {
             ],
           ),
 
-          // Destination predictions dropdown - Positioned as an overlay
-          if (_destinationPredictions.isNotEmpty)
-            Positioned(
-              top: 180, // Position right below the destination input field
-              left: 16,
-              right: 16,
-              child: LocationSuggestionWidget(
-                predictions: _destinationPredictions,
-                onTap: _selectDestinationPlace,
-                iconColor: Colors.red,
-              ),
-            ),
+          // Destination predictions dropdown - Positioned as an overlay with animation
+          AnimatedBuilder(
+            animation: _suggestionsAnimation,
+            builder: (context, child) {
+              return _shouldShowSuggestions &&
+                      _destinationPredictions.isNotEmpty
+                  ? Positioned(
+                    top:
+                        180, // Position right below the destination input field
+                    left: 16,
+                    right: 16,
+                    child: FadeTransition(
+                      opacity: _suggestionsAnimation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: Offset(0.0, -0.1),
+                          end: Offset.zero,
+                        ).animate(_suggestionsAnimation),
+                        child: LocationSuggestionWidget(
+                          predictions: _destinationPredictions,
+                          onTap: _selectDestinationPlace,
+                          iconColor: Colors.red,
+                        ),
+                      ),
+                    ),
+                  )
+                  : SizedBox.shrink();
+            },
+          ),
 
           // Loading indicator overlay
-          if (_isLoadingDestination)
+          if (_isLoadingDestination && _destinationFocusNode.hasFocus)
             Positioned(
               top: 180,
               left: 20,
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 3,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+              child: FadeTransition(
+                opacity: _suggestionsAnimation,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 3,
                       ),
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      'Loading suggestions...',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Loading suggestions...',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

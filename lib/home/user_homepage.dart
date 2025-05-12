@@ -13,6 +13,7 @@ import 'bottom_navbar.dart';
 import 'emergency_page.dart';
 import 'google_map.dart';
 import 'profile_page.dart';
+import 'LocationsPageSaved.dart'; // Import the new page
 
 class HomePage extends StatefulWidget {
   @override
@@ -89,8 +90,11 @@ class _HomePageState extends State<HomePage>
   }
 
   void _onItemTapped(int index) {
-    if (index == 1) {
-      // Navigate to EmergencyContactsPage instead of showing the dialog
+    if (index == 0) {
+      // Navigate to LocationsPageSaved when Locations tab is pressed
+      _showLocationsModal();
+    } else if (index == 1) {
+      // Navigate to EmergencyContactsPage when Emergency tab is pressed
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => EmergencyContactsPage()),
@@ -102,6 +106,39 @@ class _HomePageState extends State<HomePage>
         _selectedIndex = index;
       });
     }
+  }
+
+  // New method to show Locations page as a modal
+  void _showLocationsModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
+      builder:
+          (context) => FractionallySizedBox(
+            heightFactor: 0.9,
+            child: SlideInUp(
+              duration: Duration(milliseconds: 400),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: LocationsPageSaved(),
+              ),
+            ),
+          ),
+    );
   }
 
   Future<void> _logout() async {
@@ -448,14 +485,25 @@ class _HomePageState extends State<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    // Update AppBar title based on the selected tab
+    String appBarTitle = "Welcome${firstName.isNotEmpty ? ', $firstName' : ''}";
+    Color appBarColor = Colors.blue;
+
+    // Update the color based on selected tab
+    if (_selectedIndex == 0) {
+      appBarTitle = "Welcome${firstName.isNotEmpty ? ', $firstName' : ''}";
+      appBarColor = Colors.blue;
+    } else if (_selectedIndex == 1) {
+      appBarTitle = "Emergency";
+      appBarColor = Colors.redAccent;
+    }
+
     return Scaffold(
       extendBodyBehindAppBar: false,
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
         child: Container(
-          decoration: BoxDecoration(
-            color: _selectedIndex == 1 ? Colors.redAccent : Colors.blue,
-          ),
+          decoration: BoxDecoration(color: appBarColor),
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -465,9 +513,7 @@ class _HomePageState extends State<HomePage>
                   FadeIn(
                     duration: Duration(milliseconds: 600),
                     child: Text(
-                      _selectedIndex == 0
-                          ? "Welcome${firstName.isNotEmpty ? ', $firstName' : ''}"
-                          : "Emergency",
+                      appBarTitle,
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,

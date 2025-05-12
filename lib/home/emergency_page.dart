@@ -8,11 +8,12 @@ import 'package:geolocator/geolocator.dart';
 
 class EmergencyDialog {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
-  // Updated to use your database URL
+  // Using the provided database URL
   static final FirebaseDatabase _database = FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL:
-          'https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/');
+    app: Firebase.app(),
+    databaseURL:
+        'https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/',
+  );
 
   // Semaphore SMS API credentials
   static const String apiKey = "ebced0ed69d67b826ef466fda6bd533b";
@@ -27,8 +28,9 @@ class EmergencyDialog {
     if (user != null) {
       try {
         // Updated reference to use direct UID path
-        DatabaseReference contactsRef =
-            _database.ref("emergency_contacts/${user.uid}");
+        DatabaseReference contactsRef = _database.ref(
+          "emergency_contacts/${user.uid}",
+        );
         final snapshot = await contactsRef.get();
 
         if (snapshot.exists) {
@@ -45,6 +47,7 @@ class EmergencyDialog {
                   emergencyContacts.add({
                     'name': contactValue['name'] ?? 'Unknown',
                     'phone': contactValue['phone'] ?? '',
+                    'isAdmin': false,
                   });
                 }
               }
@@ -74,6 +77,7 @@ class EmergencyDialog {
                         emergencyContacts.add({
                           'name': contactValue['name'] ?? 'Unknown',
                           'phone': contactValue['phone'] ?? '',
+                          'isAdmin': false,
                         });
                       }
                     }
@@ -97,12 +101,65 @@ class EmergencyDialog {
     return emergencyContacts;
   }
 
+  /// NEW FUNCTION: Fetch admin contacts from Firebase
+  static Future<List<Map<String, dynamic>>> _fetchAdminContacts() async {
+    List<Map<String, dynamic>> adminContacts = [];
+
+    try {
+      // Reference to admin_contacts in Firebase
+      DatabaseReference adminContactsRef = _database.ref("admin_contacts");
+      final snapshot = await adminContactsRef.get();
+
+      if (snapshot.exists) {
+        Map<dynamic, dynamic>? contactsMap =
+            snapshot.value as Map<dynamic, dynamic>?;
+
+        if (contactsMap != null) {
+          contactsMap.forEach((contactKey, contactValue) {
+            // Case 1: When contact is stored as a map
+            if (contactValue is Map<dynamic, dynamic>) {
+              if (contactValue.containsKey('phone')) {
+                adminContacts.add({
+                  'name': contactValue['name'] ?? 'Admin',
+                  'phone': contactValue['phone'] ?? '',
+                  'isAdmin': true,
+                });
+              }
+            }
+            // Case 2: Direct key-value pairs like in the image
+            else if (contactKey is String && contactValue is String) {
+              // If the value appears to be a phone number
+              if (contactValue.startsWith('0') ||
+                  contactValue.startsWith('+') ||
+                  contactValue.startsWith('63')) {
+                adminContacts.add({
+                  'name': 'Admin',
+                  'phone': contactValue,
+                  'isAdmin': true,
+                });
+              }
+            }
+          });
+        }
+      }
+
+      print("Found ${adminContacts.length} admin contacts");
+      for (var contact in adminContacts) {
+        print("Admin Contact: ${contact['name']} - ${contact['phone']}");
+      }
+    } catch (e) {
+      print("Error fetching admin contacts: $e");
+    }
+
+    return adminContacts;
+  }
+
   /// Fetch user information from Firebase to get the full name
   static Future<Map<String, String>> _getUserInfo() async {
     Map<String, String> userInfo = {
       'firstName': '',
       'lastName': '',
-      'fullName': ''
+      'fullName': '',
     };
 
     User? user = _auth.currentUser;
@@ -225,7 +282,8 @@ class EmergencyDialog {
     // Get the current position
     try {
       Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        desiredAccuracy: LocationAccuracy.high,
+      );
       print("Location retrieved: ${position.latitude}, ${position.longitude}");
       return position;
     } catch (e) {
@@ -236,16 +294,18 @@ class EmergencyDialog {
 
   /// Send SMS alerts to emergency contacts - IMPROVED
   static Future<Map<String, dynamic>> _sendSmsAlerts(
-      List<Map<String, dynamic>> contacts, Position? position) async {
+    List<Map<String, dynamic>> contacts,
+    Position? position,
+  ) async {
     Map<String, dynamic> result = {
       'success': false,
       'sent': 0,
       'total': contacts.length,
-      'messages': []
+      'messages': [],
     };
 
     if (contacts.isEmpty) {
-      print("No emergency contacts available to send alerts");
+      print("No contacts available to send alerts");
       return result;
     }
 
@@ -271,6 +331,7 @@ class EmergencyDialog {
     for (var contact in contacts) {
       String phone = contact['phone'];
       String contactName = contact['name'];
+      bool isAdmin = contact['isAdmin'] ?? false;
 
       try {
         // Format the phone number
@@ -282,7 +343,8 @@ class EmergencyDialog {
             'name': contactName,
             'phone': phone,
             'status': 'error',
-            'message': 'Invalid phone number format'
+            'message': 'Invalid phone number format',
+            'isAdmin': isAdmin,
           });
           continue;
         }
@@ -296,14 +358,16 @@ class EmergencyDialog {
             'name': contactName,
             'phone': formattedPhone,
             'status': 'sent',
-            'message': 'Message sent successfully'
+            'message': 'Message sent successfully',
+            'isAdmin': isAdmin,
           });
         } else {
           result['messages'].add({
             'name': contactName,
             'phone': formattedPhone,
             'status': 'error',
-            'message': response['error'] ?? 'Failed to send message'
+            'message': response['error'] ?? 'Failed to send message',
+            'isAdmin': isAdmin,
           });
         }
       } catch (e) {
@@ -312,7 +376,8 @@ class EmergencyDialog {
           'name': contactName,
           'phone': phone,
           'status': 'error',
-          'message': e.toString()
+          'message': e.toString(),
+          'isAdmin': isAdmin,
         });
       }
     }
@@ -370,7 +435,9 @@ class EmergencyDialog {
 
   /// Send a single SMS using the Semaphore API
   static Future<Map<String, dynamic>> _sendSingleSms(
-      String phoneNumber, String message) async {
+    String phoneNumber,
+    String message,
+  ) async {
     try {
       print("Sending SMS to: $phoneNumber");
 
@@ -383,10 +450,7 @@ class EmergencyDialog {
       };
 
       // Make the HTTP POST request
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        body: formData,
-      );
+      final response = await http.post(Uri.parse(apiUrl), body: formData);
 
       print("SMS API Response code: ${response.statusCode}");
       print("SMS API Response body: ${response.body}");
@@ -404,7 +468,7 @@ class EmergencyDialog {
               } else {
                 return {
                   'success': false,
-                  'error': 'Message status: ${status.toLowerCase()}'
+                  'error': 'Message status: ${status.toLowerCase()}',
                 };
               }
             }
@@ -419,7 +483,7 @@ class EmergencyDialog {
       } else {
         return {
           'success': false,
-          'error': 'HTTP Error ${response.statusCode}: ${response.body}'
+          'error': 'HTTP Error ${response.statusCode}: ${response.body}',
         };
       }
     } catch (e) {
@@ -481,9 +545,7 @@ class EmergencyDialog {
               ),
               child: Text(
                 'Send Alert',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: () async {
                 // Show loading dialog
@@ -507,14 +569,18 @@ class EmergencyDialog {
                   },
                 );
 
-                // Get emergency contacts
-                final contacts = await _fetchEmergencyContacts();
+                // Get emergency contacts and admin contacts
+                final userContacts = await _fetchEmergencyContacts();
+                final adminContacts = await _fetchAdminContacts();
+
+                // Combine both lists
+                final allContacts = [...userContacts, ...adminContacts];
 
                 // Get current location
                 final position = await _getCurrentLocation();
 
-                // Send SMS alerts
-                final result = await _sendSmsAlerts(contacts, position);
+                // Send SMS alerts to all contacts
+                final result = await _sendSmsAlerts(allContacts, position);
 
                 // Close loading dialog
                 Navigator.of(context).pop();
@@ -531,10 +597,11 @@ class EmergencyDialog {
                     content: Row(
                       children: [
                         Icon(
-                            result['success']
-                                ? Icons.check_circle
-                                : Icons.warning,
-                            color: Colors.white),
+                          result['success']
+                              ? Icons.check_circle
+                              : Icons.warning,
+                          color: Colors.white,
+                        ),
                         SizedBox(width: 10),
                         Text(
                           result['success']
@@ -544,9 +611,10 @@ class EmergencyDialog {
                         ),
                       ],
                     ),
-                    backgroundColor: result['success']
-                        ? Colors.green.shade700
-                        : Colors.orange.shade700,
+                    backgroundColor:
+                        result['success']
+                            ? Colors.green.shade700
+                            : Colors.orange.shade700,
                     behavior: SnackBarBehavior.floating,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -576,101 +644,102 @@ class EmergencyDialog {
     await showDialog(
       context: context,
       builder: (BuildContext context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Container(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.warning_amber_rounded,
-                          color: Colors.red.shade700,
-                          size: 24,
-                        ),
-                      ),
-                      SizedBox(width: 12),
-                      Text(
-                        'Emergency Alert',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-
-                  // Main content
-                  Container(
-                    padding: EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red.shade100),
-                    ),
-                    child: Column(
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Container(
+                padding: EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.my_location,
-                              size: 18,
-                              color: Colors.red.shade700,
-                            ),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Your current location will be shared',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.red.shade800,
-                                ),
-                              ),
-                            ),
-                          ],
+                        Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade100,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.red.shade700,
+                            size: 24,
+                          ),
                         ),
-                        SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.notifications_active,
-                              size: 18,
-                              color: Colors.red.shade700,
-                            ),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Emergency contacts will be notified via SMS',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.red.shade800,
-                                ),
-                              ),
-                            ),
-                          ],
+                        SizedBox(width: 12),
+                        Text(
+                          'Emergency Alert',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade700,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  SizedBox(height: 24),
+                    SizedBox(height: 20),
 
-                  // Buttons
-                  isLoading
-                      ? Center(
+                    // Main content
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red.shade100),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.my_location,
+                                size: 18,
+                                color: Colors.red.shade700,
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Your current location will be shared',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.notifications_active,
+                                size: 18,
+                                color: Colors.red.shade700,
+                              ),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Emergency and admin contacts will be notified via SMS',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 24),
+
+                    // Buttons
+                    isLoading
+                        ? Center(
                           child: Column(
                             children: [
                               CircularProgressIndicator(
@@ -687,7 +756,7 @@ class EmergencyDialog {
                             ],
                           ),
                         )
-                      : Row(
+                        : Row(
                           children: [
                             Expanded(
                               child: OutlinedButton(
@@ -735,16 +804,26 @@ class EmergencyDialog {
                                     isLoading = true;
                                   });
 
-                                  // Get emergency contacts
-                                  final contacts =
+                                  // Get emergency contacts and admin contacts
+                                  final userContacts =
                                       await _fetchEmergencyContacts();
+                                  final adminContacts =
+                                      await _fetchAdminContacts();
+
+                                  // Combine both lists
+                                  final allContacts = [
+                                    ...userContacts,
+                                    ...adminContacts,
+                                  ];
 
                                   // Get current location
                                   final position = await _getCurrentLocation();
 
-                                  // Send SMS alerts
-                                  final result =
-                                      await _sendSmsAlerts(contacts, position);
+                                  // Send SMS alerts to all contacts
+                                  final result = await _sendSmsAlerts(
+                                    allContacts,
+                                    position,
+                                  );
 
                                   // Set alert sent flag
                                   alertSent = result['success'];
@@ -758,10 +837,11 @@ class EmergencyDialog {
                                       content: Row(
                                         children: [
                                           Icon(
-                                              result['success']
-                                                  ? Icons.check_circle
-                                                  : Icons.warning,
-                                              color: Colors.white),
+                                            result['success']
+                                                ? Icons.check_circle
+                                                : Icons.warning,
+                                            color: Colors.white,
+                                          ),
                                           SizedBox(width: 10),
                                           Expanded(
                                             child: Column(
@@ -774,22 +854,24 @@ class EmergencyDialog {
                                                       ? 'Emergency Alert Sent'
                                                       : 'Alert Sent with Errors',
                                                   style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold),
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                                 Text(
                                                   '${result['sent']} of ${result['total']} contacts notified',
-                                                  style:
-                                                      TextStyle(fontSize: 12),
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                  ),
                                                 ),
                                               ],
                                             ),
                                           ),
                                         ],
                                       ),
-                                      backgroundColor: result['success']
-                                          ? Colors.green.shade700
-                                          : Colors.orange.shade700,
+                                      backgroundColor:
+                                          result['success']
+                                              ? Colors.green.shade700
+                                              : Colors.orange.shade700,
                                       behavior: SnackBarBehavior.floating,
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(10),
@@ -803,11 +885,12 @@ class EmergencyDialog {
                             ),
                           ],
                         ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        });
+            );
+          },
+        );
       },
     );
 

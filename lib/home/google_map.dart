@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -469,6 +470,40 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     );
   }
 
+  Future<Map<String, dynamic>?> fetchUserInfo() async {
+    print("🔄 Fetching complete user info");
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      print("❌ No user logged in - Cannot fetch user info");
+      return null;
+    }
+
+    try {
+      final db = FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL:
+            'https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/',
+      );
+
+      final userRef = db.ref('users').child(currentUser.uid);
+      final snapshot = await userRef.get().timeout(Duration(seconds: 5));
+
+      if (snapshot.exists) {
+        final raw = snapshot.value;
+        if (raw is Map) {
+          final userData = Map<String, dynamic>.from(raw);
+          print("✅ User data fetched: $userData");
+          return userData;
+        }
+      }
+    } catch (e) {
+      print("❌ Error during fetchUserInfo: $e");
+    }
+
+    return null;
+  }
+
   Future<void> _notifyEmergencyContacts() async {
     print("🔄 STARTING EMERGENCY NOTIFICATION PROCESS");
 
@@ -614,31 +649,100 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     }
 
     try {
-      // Get user info with a very short timeout to avoid hanging
+      // Default values
       String fullName = 'Trike User';
+      Position? userPosition =
+          _currentPosition; // Default to the current tracking position
+
       final currentUser = FirebaseAuth.instance.currentUser;
 
       if (currentUser != null) {
+        // Use our new function to fetch all user information at once
         try {
-          final userSnapshot = await FirebaseDatabase.instance
-              .ref()
-              .child('users/${currentUser.uid}')
-              .get()
-              .timeout(Duration(seconds: 2));
+          print("🔄 Fetching user information using fetchUserInfo()");
+          final userInfo = await fetchUserInfo();
 
-          if (userSnapshot.exists) {
-            final userData = userSnapshot.value as Map<dynamic, dynamic>;
-            final firstName = userData['firstName']?.toString() ?? '';
-            final lastName = userData['lastName']?.toString() ?? '';
+          if (userInfo != null) {
+            final firstName = userInfo['firstName']?.toString() ?? '';
+            final lastName = userInfo['lastName']?.toString() ?? '';
 
             if (firstName.isNotEmpty || lastName.isNotEmpty) {
               fullName = '${firstName.trim()} ${lastName.trim()}'.trim();
-              if (fullName.isEmpty) fullName = 'Trike User';
+              print("📝 Using fetched user name: $fullName");
+            }
+
+            if (userInfo.containsKey('current_location')) {
+              try {
+                final locationData =
+                    userInfo['current_location'] as Map<dynamic, dynamic>;
+                final latitude = locationData['latitude']?.toDouble();
+                final longitude = locationData['longitude']?.toDouble();
+
+                if (latitude != null && longitude != null) {
+                  userPosition = Position(
+                    latitude: latitude,
+                    longitude: longitude,
+                    timestamp: DateTime.now(),
+                    accuracy: 0,
+                    altitude: 0,
+                    heading: 0,
+                    speed: 0,
+                    speedAccuracy: 0,
+                    altitudeAccuracy: 0,
+                    headingAccuracy: 0,
+                    floor: null,
+                    isMocked: false,
+                  );
+                  print(
+                    "📍 Using location from database: $latitude, $longitude",
+                  );
+                }
+              } catch (e) {
+                print("⚠️ Error parsing location data: $e");
+              }
             }
           }
         } catch (e) {
-          print("⚠️ Could not fetch user info: $e - using default name");
-          // Continue with default name
+          print("⚠️ fetchUserInfo failed: $e - will try fallbacks");
+
+          // Fallback to direct database query with a tight timeout
+          try {
+            final userSnapshot = await FirebaseDatabase.instance
+                .ref()
+                .child('users/${currentUser.uid}')
+                .get()
+                .timeout(Duration(seconds: 2));
+
+            if (userSnapshot.exists) {
+              final userData = userSnapshot.value as Map<dynamic, dynamic>;
+              final firstName = userData['firstName']?.toString() ?? '';
+              final lastName = userData['lastName']?.toString() ?? '';
+
+              if (firstName.isNotEmpty || lastName.isNotEmpty) {
+                fullName = '${firstName.trim()} ${lastName.trim()}'.trim();
+                print("📝 Using fallback database user name: $fullName");
+              }
+            }
+          } catch (e) {
+            print("⚠️ Could not fetch user info: $e - using default name");
+          }
+        }
+
+        // Last fallback options if we still don't have a name
+        if (fullName == 'Trike User') {
+          if (currentUser.displayName != null &&
+              currentUser.displayName!.isNotEmpty) {
+            fullName = currentUser.displayName!;
+            print("📝 Using Firebase Auth display name: $fullName");
+          } else if (currentUser.email != null) {
+            String emailName = currentUser.email!.split('@')[0];
+            // Capitalize first letter of email name
+            if (emailName.isNotEmpty) {
+              emailName = emailName[0].toUpperCase() + emailName.substring(1);
+              fullName = emailName;
+              print("📝 Using Firebase Auth email name: $fullName");
+            }
+          }
         }
       }
 
@@ -647,9 +751,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
       // Get location directly from current position variable
       String locationText = 'Location unavailable';
-      if (_currentPosition != null) {
-        final lat = _currentPosition!.latitude;
-        final lng = _currentPosition!.longitude;
+      if (userPosition != null) {
+        final lat = userPosition.latitude;
+        final lng = userPosition.longitude;
         locationText = 'https://maps.google.com/maps?q=$lat,$lng';
       }
 

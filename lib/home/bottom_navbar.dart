@@ -35,8 +35,8 @@ class BottomNavbar extends StatelessWidget {
           Expanded(
             child: _buildNavItem(
               context: context,
-              icon: Icons.map,
-              label: 'Map',
+              icon: Icons.location_on, // Changed from map to location_on icon
+              label: 'Locations', // Changed from Map to Locations
               index: 0,
               defaultColor: Colors.grey, // Set default color to grey
             ),
@@ -50,12 +50,8 @@ class BottomNavbar extends StatelessWidget {
               color: Colors.red,
             ),
           ),
-          Expanded(
-            child: _buildAlertButton(),
-          ),
-          Expanded(
-            child: _buildRideButton(),
-          ),
+          Expanded(child: _buildAlertButton()),
+          Expanded(child: _buildRideButton()),
           Expanded(
             child: _buildNavItem(
               context: context,
@@ -87,9 +83,10 @@ class BottomNavbar extends StatelessWidget {
         duration: Duration(milliseconds: 300),
         padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         decoration: BoxDecoration(
-          color: isSelected && color != null
-              ? navColor.withOpacity(0.1)
-              : Colors.transparent,
+          color:
+              isSelected && color != null
+                  ? navColor.withOpacity(0.1)
+                  : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -131,11 +128,7 @@ class BottomNavbar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.local_taxi,
-              color: Colors.grey,
-              size: 20,
-            ),
+            Icon(Icons.local_taxi, color: Colors.grey, size: 20),
             SizedBox(height: 2),
             Text(
               'Ride',
@@ -173,11 +166,7 @@ class BottomNavbar extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.warning_outlined,
-              color: Colors.white,
-              size: 20,
-            ),
+            Icon(Icons.warning_outlined, color: Colors.white, size: 20),
             SizedBox(height: 2),
             Text(
               'Alert',
