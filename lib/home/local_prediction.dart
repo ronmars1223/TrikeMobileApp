@@ -276,50 +276,7 @@ class LocationSuggestionService {
 
   // Default recent places for Davao - using popular Davao locations with ride history
   static List<LocalPrediction> getDefaultRecentPlaces() {
-    return [
-      LocalPrediction(
-        placeId: "r1",
-        mainText: "SM City Davao",
-        secondaryText: "Quimpo Boulevard, Davao City",
-        description: "SM City Davao, Quimpo Boulevard, Davao City",
-        coordinates: LatLng(7.0530, 125.5957),
-        isRecent: true,
-        recent_history: {
-          "destination": "SM City Davao, Quimpo Boulevard, Davao City",
-          "destination_lat": 7.0530,
-          "destination_lng": 125.5957,
-          "driverId": "QL7Pmc90KgMi4TgoKCf",
-          "driverLicense": "asdasdzxc123",
-          "driverName": "hello world",
-          "pickup": "Current Location: panacan, Buhangin, Davao City",
-          "pickup_lat": 7.1450083,
-          "pickup_lng": 125.6518696,
-          "status": "confirmed",
-          "timestamp": 1746964748485,
-          "userId": "WkCng95XbWSfAvgoiytHFUnkL2",
-        },
-      ),
-      LocalPrediction(
-        placeId: "saved_location_1",
-        mainText: "Location (7.145, 125.6517)",
-        secondaryText: "panacan, Buhangin, Davao City, Davao Region",
-        description:
-            "Location (7.145, 125.6517), panacan, Buhangin, Davao City, Davao Region",
-        coordinates: LatLng(7.145252, 125.651872),
-        isRecent: true,
-        recent_history: {
-          "source": "saved_location",
-          "type": "home",
-          "latitude": 7.145252,
-          "longitude": 125.651872,
-          "address": "panacan, Buhangin, Davao City, Davao Region",
-          "name": "Location (7.145, 125.6517)",
-          "timestamp": 1740669689682,
-          "isFavorite": false,
-        },
-      ),
-      // ... (rest of the default recent places remain the same)
-    ];
+    return [];
   }
 
   // Create a "Search More" prediction

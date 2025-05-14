@@ -15,10 +15,6 @@ class LocationSuggestionWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (predictions.isEmpty) {
-      return SizedBox.shrink();
-    }
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -26,93 +22,112 @@ class LocationSuggestionWidget extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            spreadRadius: 1,
-            offset: Offset(0, 3),
+            blurRadius: 4,
+            offset: Offset(0, 2),
           ),
         ],
       ),
-      margin: EdgeInsets.only(top: 4, bottom: 12),
-      child: Material(
-        color: Colors.transparent,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: ListView.separated(
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            itemCount: predictions.length,
-            separatorBuilder: (context, index) =>
-                Divider(height: 1, thickness: 0.5, indent: 56),
-            itemBuilder: (context, index) {
-              final prediction = predictions[index];
+      child: ListView.builder(
+        shrinkWrap: true,
+        physics: NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        itemCount: predictions.length,
+        itemBuilder: (context, index) {
+          final prediction = predictions[index];
 
-              // Choose icon based on prediction type
-              IconData iconData;
-              Color itemIconColor;
+          // Determine icon based on location type
+          IconData leadingIcon;
+          Color? iconColorOverride;
 
-              if (prediction.isSearchMore) {
-                iconData = Icons.search;
-                itemIconColor = Colors.blue;
-              } else if (prediction.isRecent) {
-                iconData = Icons.history;
-                itemIconColor = Colors.grey.shade600;
-              } else if (prediction.isOnlineResult) {
-                iconData = Icons.public;
-                itemIconColor = iconColor;
-              } else {
-                iconData = Icons.location_on_outlined;
-                itemIconColor = iconColor;
+          if (prediction.isSearchMore) {
+            leadingIcon = Icons.search;
+          } else if (prediction.recent_history != null &&
+              prediction.recent_history!['source'] == 'saved_location') {
+            // Check for saved location types
+            final locationType =
+                prediction.recent_history!['type']?.toString() ?? 'other';
+            final isFavorite = prediction.recent_history!['isFavorite'] == true;
+
+            if (isFavorite) {
+              leadingIcon = Icons.favorite;
+              iconColorOverride = Colors.red;
+            } else {
+              switch (locationType) {
+                case 'home':
+                  leadingIcon = Icons.home;
+                  break;
+                case 'work':
+                  leadingIcon = Icons.work;
+                  break;
+                default:
+                  leadingIcon = Icons.star;
               }
+            }
+          } else if (prediction.isRecent) {
+            leadingIcon = Icons.history;
+          } else {
+            leadingIcon = Icons.location_on;
+          }
 
-              return InkWell(
-                onTap: () => onTap(prediction),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  child: Row(
-                    children: [
-                      SizedBox(width: 8),
-                      Icon(iconData, color: itemIconColor, size: 22),
-                      SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              prediction.mainText,
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: prediction.isSearchMore
-                                      ? FontWeight.w600
-                                      : FontWeight.w500,
-                                  color: prediction.isSearchMore
-                                      ? Colors.blue
-                                      : Colors.black.withOpacity(0.85)),
-                              overflow: TextOverflow.ellipsis,
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => onTap(prediction),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                child: Row(
+                  children: [
+                    Icon(
+                      leadingIcon,
+                      color: iconColorOverride ?? iconColor,
+                      size: 20,
+                    ),
+                    SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            prediction.mainText,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
                             ),
-                            Text(
-                              prediction.secondaryText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade600,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            prediction.secondaryText,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
                             ),
-                          ],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Add a trailing icon for saved locations
+                    if (prediction.recent_history != null &&
+                        prediction.recent_history!['source'] ==
+                            'saved_location')
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Icon(
+                          Icons.bookmark,
+                          size: 16,
+                          color: Colors.grey.shade400,
                         ),
                       ),
-                      // Add an arrow for the search more option
-                      if (prediction.isSearchMore)
-                        Icon(Icons.arrow_forward_ios,
-                            color: Colors.blue, size: 14),
-                    ],
-                  ),
+                  ],
                 ),
-              );
-            },
-          ),
-        ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
