@@ -67,7 +67,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   List<Map<String, String>> _emergencyContacts = [];
   bool _hasNotifiedEmergencyContacts = false;
   bool _hasArrivedAtDestination = false;
-  double _arrivalThresholdDistance = 0.1;
+  double _arrivalThresholdDistance = 0.5;
 
   // Countdown timer
   Timer? _countdownTimer;
@@ -169,10 +169,10 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
               heading: 0.0,
               speed: data['speed'] ?? 0.0,
               speedAccuracy: 0.0,
-              altitudeAccuracy: 0.0, // Added missing parameter
-              headingAccuracy: 0.0, // Added missing parameter
-              floor: null, // Added missing parameter
-              isMocked: false, // Added missing parameter
+              altitudeAccuracy: 0.0,
+              headingAccuracy: 0.0,
+              floor: null,
+              isMocked: false,
             );
 
             // Update pickup coordinates if needed
@@ -196,12 +196,13 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                 _destinationCoords!,
               );
 
-              // If within threshold distance, mark as arrived
+              // If within threshold distance (50 meters = 0.05 km), mark as arrived
               if (distanceToDestination <= _arrivalThresholdDistance) {
                 _hasArrivedAtDestination = true;
                 _countdownTimer?.cancel();
                 _countdownText = "Arrived";
 
+                // Show arrived notification
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('You have arrived at your destination!'),
@@ -209,6 +210,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                     duration: Duration(seconds: 5),
                   ),
                 );
+
+                // Auto-reload route information
+                _reloadRouteOnArrival();
               }
             }
           });
@@ -261,48 +265,77 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     }
   }
 
-  // Modify the _updateCurrentLocation method to check if user has arrived
-  void _updateCurrentLocation(Position position) {
-    if (!mounted) return;
+  void _reloadRouteOnArrival() {
+    // Cancel any existing timers
+    _countdownTimer?.cancel();
 
-    setState(() {
-      _currentPosition = position;
-      if (_pickup == null || _pickup!.contains("Current Location")) {
-        _pickupCoords = LatLng(position.latitude, position.longitude);
-        if (_destinationCoords != null) {
-          _distance = _calculateDistance(_pickupCoords!, _destinationCoords!);
+    // Reset the arrival state after a short delay (to allow notification to be seen)
+    Future.delayed(Duration(seconds: 5), () {
+      if (!mounted) return;
 
-          // Check if user has arrived at destination
-          if (_destinationCoords != null && !_hasArrivedAtDestination) {
-            double distanceToDestination = _calculateDistance(
-              LatLng(position.latitude, position.longitude),
-              _destinationCoords!,
-            );
+      // Only perform auto-reload if we're still on the same destination
+      if (_hasArrivedAtDestination && _destinationCoords != null) {
+        setState(() {
+          // Mark that we've completed this destination
+          _hasArrivedAtDestination = true;
+          _countdownText = "Arrived";
 
-            // If within threshold distance, mark as arrived
-            if (distanceToDestination <= _arrivalThresholdDistance) {
-              _hasArrivedAtDestination = true;
-              _countdownTimer?.cancel();
-              setState(() => _countdownText = "Arrived");
+          // Update the UI to reflect arrival
+          _polylines.clear();
+          _polylines.add(
+            Polyline(
+              polylineId: PolylineId('arrival_route'),
+              points: [
+                LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+                _destinationCoords!,
+              ],
+              color: Colors.green,
+              width: 6,
+            ),
+          );
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('You have arrived at your destination!'),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 5),
-                ),
-              );
-            }
-          }
-        }
+          // Show the destination mark more prominently
+          _markers.clear();
+          _markers.add(
+            Marker(
+              markerId: MarkerId('destination'),
+              position: _destinationCoords!,
+              infoWindow: InfoWindow(
+                title: 'Destination',
+                snippet: _destination,
+              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueGreen,
+              ),
+            ),
+          );
+
+          // Show current location marker
+          _markers.add(
+            Marker(
+              markerId: MarkerId('current_location'),
+              position: LatLng(
+                _currentPosition!.latitude,
+                _currentPosition!.longitude,
+              ),
+              infoWindow: InfoWindow(title: 'Current Location'),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueBlue,
+              ),
+            ),
+          );
+        });
+
+        // Center the map to show both the user and destination
+        _zoomToShowBothLocations(
+          LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+          _destinationCoords!,
+        );
       }
     });
-
-    if (_isFollowingUser) {
-      _animateToCurrentLocation(zoom: 17.0);
-    }
   }
 
+  // Modify the _updateCurrentLocation method to check if user has arrived
   Future<void> _animateToCurrentLocation({double zoom = 14.0}) async {
     try {
       final controller = await _mapController.future;
@@ -414,15 +447,14 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   void _updateCountdownText() {
     if (_estimatedArrivalTime == null || !mounted) return;
 
-    final now = DateTime.now();
-    final difference = _estimatedArrivalTime!.difference(now);
-
-    // If we've arrived at destination, don't need to update or send alerts
+    // If we've arrived at destination, always show "Arrived" state
     if (_hasArrivedAtDestination) {
       setState(() => _countdownText = "Arrived");
-      _countdownTimer?.cancel();
       return;
     }
+
+    final now = DateTime.now();
+    final difference = _estimatedArrivalTime!.difference(now);
 
     // If time is up but we haven't arrived
     if (difference.isNegative) {
@@ -453,21 +485,6 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
         _countdownText = "${seconds}s";
       }
     });
-  }
-
-  Future<void> _resetNotificationStatus() async {
-    setState(() {
-      _hasNotifiedEmergencyContacts = false;
-    });
-    print("🔄 Reset notification status to false");
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Notification status reset - will send again next time'),
-        backgroundColor: Colors.blue,
-        duration: Duration(seconds: 3),
-      ),
-    );
   }
 
   Future<Map<String, dynamic>?> fetchUserInfo() async {
@@ -1236,25 +1253,6 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     });
   }
 
-  // Traffic is always enabled, but we keep this method for recalculating routes
-  // when time of day changes or for future modifications
-  void _updateTrafficMultiplier() {
-    final hour = DateTime.now().hour;
-    if (hour >= 7 && hour <= 9) {
-      _trafficMultiplier = 1.5; // Morning rush
-    } else if (hour >= 16 && hour <= 19) {
-      _trafficMultiplier = 1.7; // Evening rush
-    } else if (hour >= 23 || hour <= 5) {
-      _trafficMultiplier = 0.8; // Late night
-    } else {
-      _trafficMultiplier = 1.2; // Normal daytime
-    }
-
-    if (_pickupCoords != null && _destinationCoords != null) {
-      _getDirections(_pickupCoords!, _destinationCoords!);
-    }
-  }
-
   Future<void> _getDirections(LatLng origin, LatLng destination) async {
     return findFastestRoute(origin, destination);
   }
@@ -1730,9 +1728,11 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
         // Trip Information Panel (when destination is set)
         if (_destination != null)
-          AnimatedContainer(
-            duration: Duration(milliseconds: 300),
+          Container(
             height: _isTripInfoVisible ? null : 48,
+            constraints: BoxConstraints(
+              maxHeight: _isTripInfoVisible ? 300 : 48,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
@@ -1744,405 +1744,483 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header with toggle button
-                InkWell(
-                  onTap: _toggleTripInfoVisibility,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Left side - Title when expanded, countdown when minimized
-                        Row(
-                          children: [
-                            if (!_isTripInfoVisible &&
-                                _countdownText.isNotEmpty)
-                              Container(
-                                margin: EdgeInsets.only(right: 10),
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.shade100,
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: Colors.orange.shade300,
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.timer,
-                                      size: 14,
-                                      color: Colors.orange.shade800,
-                                    ),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      _countdownText,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                        color: Colors.orange.shade800,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            Text(
-                              _isTripInfoVisible
-                                  ? 'Trip Information'
-                                  : (_estimatedArrivalTime != null
-                                      ? 'ETA: ${_formatArrivalTime(_estimatedArrivalTime!)}'
-                                      : 'Trip Information'),
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.blue.shade800,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        // Right side - Change button when expanded, arrow icon
-                        Row(
-                          children: [
-                            if (_isTripInfoVisible)
-                              TextButton.icon(
-                                onPressed: clearDestination,
-                                icon: Icon(Icons.edit_location_alt, size: 16),
-                                label: Text('CHANGE'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.blue,
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                              ),
-                            SizedBox(width: 8),
-                            Icon(
-                              _isTripInfoVisible
-                                  ? Icons.keyboard_arrow_down
-                                  : Icons.keyboard_arrow_up,
-                              color: Colors.grey.shade600,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Expanded information (hidden when collapsed)
-                if (_isTripInfoVisible)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // From location
-                        Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(
-                                Icons.my_location,
-                                color: Colors.blue,
-                                size: 16,
-                              ),
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'From',
-                                    style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    _pickup ?? 'Current Location',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        // Connecting line
-                        Padding(
-                          padding: const EdgeInsets.only(left: 16),
-                          child: Container(
-                            height: 20,
-                            width: 1,
-                            color: Colors.grey.shade300,
-                          ),
-                        ),
-
-                        // To location
-                        Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(
-                                Icons.location_on,
-                                color: Colors.red,
-                                size: 16,
-                              ),
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'To',
-                                    style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    _destination!,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        // Route information section
-                        SizedBox(height: 16),
-                        Container(
-                          padding: EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Column(
+            child: SingleChildScrollView(
+              physics: NeverScrollableScrollPhysics(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header with toggle button
+                  InkWell(
+                    onTap: _toggleTripInfoVisibility,
+                    child: Container(
+                      height: 48,
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Left side - Title when expanded, arrival status or countdown when minimized
+                          Row(
                             children: [
-                              // Route type badge with overflow handling
-                              Container(
-                                width: double.infinity,
-                                alignment: Alignment.center,
-                                child: Container(
-                                  constraints: BoxConstraints(
-                                    maxWidth:
-                                        MediaQuery.of(context).size.width - 80,
-                                  ),
+                              if (!_isTripInfoVisible &&
+                                  _distance != null &&
+                                  _distance! <= 0.05)
+                                // Show "Arrived" status when within 50m of destination
+                                Container(
+                                  margin: EdgeInsets.only(right: 10),
                                   padding: EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
+                                    horizontal: 8,
+                                    vertical: 3,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.blue.shade700,
-                                    borderRadius: BorderRadius.circular(16),
+                                    color: Colors.green.shade100,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: Colors.green.shade300,
+                                      width: 1,
+                                    ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        Icons.bolt,
-                                        color: Colors.white,
+                                        Icons.check_circle,
                                         size: 14,
+                                        color: Colors.green.shade800,
                                       ),
                                       SizedBox(width: 4),
-                                      Flexible(
-                                        child: Text(
-                                          _routeType,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
+                                      Text(
+                                        "Arrived",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: Colors.green.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else if (!_isTripInfoVisible &&
+                                  _countdownText.isNotEmpty &&
+                                  (_distance == null || _distance! > 0.05))
+                                // Show countdown only if not arrived and countdown exists
+                                Container(
+                                  margin: EdgeInsets.only(right: 10),
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.shade100,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: Colors.orange.shade300,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.timer,
+                                        size: 14,
+                                        color: Colors.orange.shade800,
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        _countdownText,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: Colors.orange.shade800,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                              SizedBox(height: 10),
-                              // Route details - Modified to show only Distance and Duration
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  // Distance
-                                  Column(
-                                    children: [
-                                      Icon(
-                                        Icons.route,
-                                        color: Colors.blue.shade700,
-                                        size: 18,
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        _distance != null
-                                            ? _formatDistance(_distance!)
-                                            : 'Calculating...',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Distance',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  // Duration with countdown
-                                  Column(
-                                    children: [
-                                      Icon(
-                                        Icons.access_time,
-                                        color: Colors.blue.shade700,
-                                        size: 18,
-                                      ),
-                                      SizedBox(height: 4),
-                                      Column(
-                                        children: [
-                                          Text(
-                                            _routeDuration.isNotEmpty
-                                                ? _routeDuration
-                                                : 'Calculating...',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          if (_countdownText.isNotEmpty)
-                                            GestureDetector(
-                                              onTap: _resetCountdown,
-                                              child: Container(
-                                                padding: EdgeInsets.symmetric(
-                                                  horizontal: 6,
-                                                  vertical: 2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.orange.shade100,
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                  border: Border.all(
-                                                    color:
-                                                        Colors.orange.shade300,
-                                                    width: 1,
-                                                  ),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Text(
-                                                      _countdownText,
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontSize: 12,
-                                                        color:
-                                                            Colors
-                                                                .orange
-                                                                .shade800,
-                                                      ),
-                                                    ),
-                                                    SizedBox(width: 2),
-                                                    Icon(
-                                                      Icons.edit_outlined,
-                                                      size: 10,
-                                                      color:
-                                                          Colors
-                                                              .orange
-                                                              .shade800,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      Text(
-                                        'Duration',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  // Traffic icon (always on, not toggleable)
-                                  Column(
-                                    children: [
-                                      Icon(
-                                        Icons.traffic,
-                                        color: Colors.orange,
-                                        size: 18,
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Active',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w500,
-                                          fontSize: 16,
-                                          color: Colors.orange,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Traffic',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                              Text(
+                                _isTripInfoVisible
+                                    ? 'Trip Information'
+                                    : (_distance != null && _distance! <= 0.05
+                                        ? 'Destination Reached'
+                                        : (_estimatedArrivalTime != null
+                                            ? 'ETA: ${_formatArrivalTime(_estimatedArrivalTime!)}'
+                                            : 'Trip Information')),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color:
+                                      _distance != null &&
+                                              _distance! <= 0.05 &&
+                                              !_isTripInfoVisible
+                                          ? Colors.green.shade800
+                                          : Colors.blue.shade800,
+                                ),
                               ),
                             ],
                           ),
-                        ),
 
-                        // ETA indicator (removed traffic toggle button)
-                        SizedBox(height: 12),
-                        Row(
-                          children: [
-                            if (_estimatedArrivalTime != null)
+                          // Right side - Change button when expanded, arrow icon
+                          Row(
+                            children: [
+                              if (_isTripInfoVisible)
+                                TextButton.icon(
+                                  onPressed: clearDestination,
+                                  icon: Icon(Icons.edit_location_alt, size: 16),
+                                  label: Text('CHANGE'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.blue,
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 4,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                ),
+                              SizedBox(width: 8),
+                              Icon(
+                                _isTripInfoVisible
+                                    ? Icons.keyboard_arrow_down
+                                    : Icons.keyboard_arrow_up,
+                                color: Colors.grey.shade600,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Expanded information (hidden when collapsed)
+                  if (_isTripInfoVisible)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // From location
+                          Row(
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Icon(
+                                  Icons.my_location,
+                                  color: Colors.blue,
+                                  size: 16,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'From',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      _pickup ?? 'Current Location',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // Connecting line
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16),
+                            child: Container(
+                              height: 20,
+                              width: 1,
+                              color: Colors.grey.shade300,
+                            ),
+                          ),
+
+                          // To location
+                          Row(
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Icon(
+                                  Icons.location_on,
+                                  color: Colors.red,
+                                  size: 16,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'To',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      _destination!,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // Route information section
+                          SizedBox(height: 16),
+                          Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              children: [
+                                // Route type badge with overflow handling
+                                Container(
+                                  width: double.infinity,
+                                  alignment: Alignment.center,
+                                  child: Container(
+                                    constraints: BoxConstraints(
+                                      maxWidth:
+                                          MediaQuery.of(context).size.width -
+                                          80,
+                                    ),
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade700,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.bolt,
+                                          color: Colors.white,
+                                          size: 14,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            _routeType,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 10),
+                                // Route details - Modified to show only Distance and Duration
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    // Distance
+                                    Column(
+                                      children: [
+                                        Icon(
+                                          Icons.route,
+                                          color: Colors.blue.shade700,
+                                          size: 18,
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          _distance != null
+                                              ? _formatDistance(_distance!)
+                                              : 'Calculating...',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Distance',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    // Duration with countdown or Arrived status
+                                    Column(
+                                      children: [
+                                        Icon(
+                                          _distance != null &&
+                                                  _distance! <= 0.05
+                                              ? Icons.check_circle
+                                              : Icons.access_time,
+                                          color:
+                                              _distance != null &&
+                                                      _distance! <= 0.05
+                                                  ? Colors.green.shade700
+                                                  : Colors.blue.shade700,
+                                          size: 18,
+                                        ),
+                                        SizedBox(height: 4),
+                                        Column(
+                                          children: [
+                                            Text(
+                                              _distance != null &&
+                                                      _distance! <= 0.05
+                                                  ? "Arrived" // Change the main text to "Arrived" instead of showing duration
+                                                  : (_routeDuration.isNotEmpty
+                                                      ? _routeDuration
+                                                      : 'Calculating...'),
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16,
+                                                color:
+                                                    _distance != null &&
+                                                            _distance! <= 0.05
+                                                        ? Colors.green.shade700
+                                                        : Colors.black,
+                                              ),
+                                            ),
+                                            // Only show countdown if NOT arrived
+                                            if (_distance == null ||
+                                                _distance! > 0.05)
+                                              if (_countdownText.isNotEmpty)
+                                                GestureDetector(
+                                                  onTap: _resetCountdown,
+                                                  child: Container(
+                                                    padding:
+                                                        EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 2,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          Colors
+                                                              .orange
+                                                              .shade100,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            4,
+                                                          ),
+                                                      border: Border.all(
+                                                        color:
+                                                            Colors
+                                                                .orange
+                                                                .shade300,
+                                                        width: 1,
+                                                      ),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Text(
+                                                          _countdownText,
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 12,
+                                                            color:
+                                                                Colors
+                                                                    .orange
+                                                                    .shade800,
+                                                          ),
+                                                        ),
+                                                        SizedBox(width: 2),
+                                                        Icon(
+                                                          Icons.edit_outlined,
+                                                          size: 10,
+                                                          color:
+                                                              Colors
+                                                                  .orange
+                                                                  .shade800,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                          ],
+                                        ),
+                                        Text(
+                                          _distance != null &&
+                                                  _distance! <= 0.05
+                                              ? 'Status'
+                                              : 'Duration',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    // Traffic icon (always on, not toggleable)
+                                    Column(
+                                      children: [
+                                        Icon(
+                                          Icons.traffic,
+                                          color: Colors.orange,
+                                          size: 18,
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'Active',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 16,
+                                            color: Colors.orange,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Traffic',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          SizedBox(height: 12),
+                          Row(
+                            children: [
                               Expanded(
                                 child: Container(
                                   padding: EdgeInsets.symmetric(
@@ -2150,23 +2228,36 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                     horizontal: 16,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.green.shade50,
+                                    color:
+                                        _distance != null && _distance! <= 0.05
+                                            ? Colors.green.shade100
+                                            : Colors.green.shade50,
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
-                                      color: Colors.green.shade100,
+                                      color:
+                                          _distance != null &&
+                                                  _distance! <= 0.05
+                                              ? Colors.green.shade300
+                                              : Colors.green.shade100,
                                     ),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(
-                                        Icons.flag,
+                                        _distance != null && _distance! <= 0.05
+                                            ? Icons.check_circle
+                                            : Icons.flag,
                                         color: Colors.green.shade700,
                                         size: 16,
                                       ),
                                       SizedBox(width: 8),
                                       Text(
-                                        'ETA: ${_formatArrivalTime(_estimatedArrivalTime!)}',
+                                        _distance != null && _distance! <= 0.05
+                                            ? 'You have arrived at your destination!'
+                                            : _estimatedArrivalTime != null
+                                            ? 'ETA: ${_formatArrivalTime(_estimatedArrivalTime!)}'
+                                            : 'Calculating arrival time...',
                                         style: TextStyle(
                                           color: Colors.green.shade800,
                                           fontWeight: FontWeight.bold,
@@ -2176,50 +2267,54 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                   ),
                                 ),
                               ),
-                          ],
-                        ),
+                            ],
+                          ),
 
-                        // Only show the loading indicator when directions are loading
-                        if (_isLoadingDirections)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Container(
-                              width: double.infinity,
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.blue.shade100),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.blue,
+                          // Only show the loading indicator when directions are loading
+                          if (_isLoadingDirections)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Container(
+                                width: double.infinity,
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.blue.shade100,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.blue,
+                                            ),
                                       ),
                                     ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Finding fastest route...',
-                                    style: TextStyle(
-                                      color: Colors.blue.shade800,
-                                      fontWeight: FontWeight.w500,
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Finding fastest route...',
+                                      style: TextStyle(
+                                        color: Colors.blue.shade800,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
       ],
