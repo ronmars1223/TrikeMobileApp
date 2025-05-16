@@ -72,6 +72,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                 'status_activate': contactValue['status_activate'] ?? true,
                 'is_connected_user': contactValue['is_connected_user'] ?? false,
                 'connected_uid': contactValue['connected_uid'],
+                'share_location': contactValue['share_location'] ?? true,
               });
             }
           });
@@ -93,6 +94,77 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _updateSharingStatus(String contactId, bool newStatus) async {
+    try {
+      // Update UI immediately for smooth user experience
+      setState(() {
+        // Find the contact in the list and update its share_location value
+        for (int i = 0; i < contacts.length; i++) {
+          if (contacts[i]['id'] == contactId) {
+            contacts[i]['share_location'] = newStatus;
+            break;
+          }
+        }
+      });
+
+      // Get the connected user's UID from the contact
+      final contactRef = _database.ref(
+        "emergency_contacts/${user!.uid}/$contactId",
+      );
+      final contactSnapshot = await contactRef.get();
+
+      if (!contactSnapshot.exists) {
+        throw Exception("Contact not found");
+      }
+
+      Map<dynamic, dynamic>? contactData = contactSnapshot.value as Map?;
+      String? connectedUid = contactData?['connected_uid'];
+
+      if (connectedUid == null) {
+        throw Exception("Connected user UID not found");
+      }
+
+      // Update the sharing status in the connected user's contacts list
+      await _database
+          .ref("emergency_contacts/$connectedUid/${user!.uid}")
+          .update({'share_location': newStatus});
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newStatus
+                ? 'Location sharing enabled for this contact'
+                : 'Location sharing disabled for this contact',
+          ),
+          backgroundColor: newStatus ? Colors.green : Colors.orange,
+          duration: Duration(seconds: 1), // Shorter duration for better UX
+        ),
+      );
+    } catch (e) {
+      print('Error updating sharing status: $e');
+
+      // Revert the UI change since the update failed
+      setState(() {
+        // Find the contact in the list and revert its share_location value
+        for (int i = 0; i < contacts.length; i++) {
+          if (contacts[i]['id'] == contactId) {
+            contacts[i]['share_location'] =
+                !newStatus; // Revert to previous state
+            break;
+          }
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update sharing status: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -163,13 +235,44 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
     }
 
     try {
-      setState(() {
-        _isLoading = true;
-      });
+      // Show a dialog with loading indicator first
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder:
+            (BuildContext context) => AlertDialog(
+              content: Row(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(width: 16),
+                  Text('Loading user details...'),
+                ],
+              ),
+            ),
+      );
+
+      // Check if we have permission to see their location
+      bool canSeeLocation = false;
+
+      // Get the contact entry for this user to check share_location
+      final contactsRef = _database.ref(
+        "emergency_contacts/${user!.uid}/$connectedUid",
+      );
+      final contactSnapshot = await contactsRef.get();
+
+      if (contactSnapshot.exists) {
+        Map<dynamic, dynamic>? contactData = contactSnapshot.value as Map?;
+        if (contactData != null && contactData.containsKey('share_location')) {
+          canSeeLocation = contactData['share_location'] == true;
+        }
+      }
 
       // Reference to the user in Firebase
       final userRef = _database.ref("users/$connectedUid");
       final snapshot = await userRef.get();
+
+      // Close the loading dialog
+      Navigator.of(context).pop();
 
       if (snapshot.exists) {
         Map<dynamic, dynamic>? userData = snapshot.value as Map?;
@@ -212,14 +315,14 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
             fullAddress = userData['current_location']['full_address'];
           }
 
-          // Extract location data
+          // Extract location data only if we have permission to see it
           double? latitude;
           double? longitude;
           double? accuracy;
-          double? speed;
           String? timestamp;
 
-          if (userData.containsKey('current_location') &&
+          if (canSeeLocation &&
+              userData.containsKey('current_location') &&
               userData['current_location'] is Map) {
             final locationData = userData['current_location'];
 
@@ -235,10 +338,6 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
             // Parse additional location data
             if (locationData.containsKey('accuracy')) {
               accuracy = double.tryParse(locationData['accuracy'].toString());
-            }
-
-            if (locationData.containsKey('speed')) {
-              speed = double.tryParse(locationData['speed'].toString());
             }
 
             if (locationData.containsKey('timestamp')) {
@@ -294,8 +393,10 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                             dense: true,
                           ),
 
-                        // Add location map and details
-                        if (latitude != null && longitude != null) ...[
+                        // Add location map and details only if we can see location
+                        if (canSeeLocation &&
+                            latitude != null &&
+                            longitude != null) ...[
                           Divider(),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -336,14 +437,6 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                               dense: true,
                             ),
 
-                          if (speed != null)
-                            ListTile(
-                              leading: Icon(Icons.speed, color: Colors.green),
-                              title: Text('Speed'),
-                              subtitle: Text('${speed.toStringAsFixed(2)} m/s'),
-                              dense: true,
-                            ),
-
                           if (timestamp != null)
                             ListTile(
                               leading: Icon(
@@ -355,6 +448,32 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                               dense: true,
                             ),
                         ],
+
+                        // Show location sharing disabled message if needed
+                        if (!canSeeLocation)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16.0),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Divider(),
+                                  Icon(
+                                    Icons.location_off,
+                                    color: Colors.grey,
+                                    size: 40,
+                                  ),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    'Location sharing is disabled',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -389,6 +508,11 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
         );
       }
     } catch (e) {
+      // Make sure to close any open loading dialog in case of error
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
       print('Error fetching user details: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -396,10 +520,6 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
@@ -471,7 +591,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
     }
   }
 
-  // New method to connect with a user by phone number
+  //method to create bi-directional connection with UID as key
   Future<void> _connectWithUser() async {
     if (_connectFormKey.currentState!.validate() && user != null) {
       try {
@@ -500,7 +620,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
 
               // Check if this user has the mobile number we're looking for
               if (userData is Map) {
-                // Try different paths where mobile might be stored based on your screenshot
+                // Try different paths where mobile might be stored
                 var mobileNumber = userData['mobile'];
 
                 // If not found at the top level, check if it's in a nested structure
@@ -531,21 +651,42 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
           }
 
           if (foundUserId != null) {
-            // User found - add as an emergency contact
-            DatabaseReference contactsRef = _database.ref(
-              "emergency_contacts/${user!.uid}",
-            );
+            // Step 1: Get current user's info
+            final currentUserSnapshot = await usersRef.child(user!.uid).get();
+            Map<dynamic, dynamic>? currentUserData =
+                currentUserSnapshot.value as Map?;
 
-            // Create a new contact entry
-            DatabaseReference newContactRef = contactsRef.push();
-            String? contactId = newContactRef.key;
+            String currentUserName = 'Connected User';
+            String? currentUserPhone;
 
-            if (contactId == null) {
-              throw Exception("Failed to generate a contact ID");
+            if (currentUserData != null) {
+              // Try to get current user's name
+              currentUserName =
+                  currentUserData['firstName'] ??
+                  currentUserData['first_name'] ??
+                  (currentUserData['emergency_alerts'] is Map
+                      ? currentUserData['emergency_alerts']['firstName']
+                      : null) ??
+                  'Connected User';
+
+              // Try to get current user's phone
+              currentUserPhone = currentUserData['mobile'];
+              if (currentUserPhone == null &&
+                  currentUserData.containsKey('current_location')) {
+                final currentLocation = currentUserData['current_location'];
+                if (currentLocation is Map &&
+                    currentLocation.containsKey('mobile')) {
+                  currentUserPhone = currentLocation['mobile'];
+                }
+              }
             }
 
-            // Create the contact data
-            Map<String, dynamic> contactData = {
+            // Step 2: Create a transaction to add both contacts at once
+            // This ensures both operations succeed or fail together
+            final multiPathUpdate = <String, dynamic>{};
+
+            // 1. Add the found user to current user's emergency contacts using found user's UID as key
+            Map<String, dynamic> myContactData = {
               'name': foundUserName ?? 'Connected User',
               'phone': phoneNumber,
               'status_activate': true,
@@ -553,15 +694,41 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
               'connected_uid': foundUserId,
               'timestamp': ServerValue.timestamp,
               'is_connected_user': true,
+              'share_location': true,
             };
 
-            // Add the contact
-            await contactsRef.child(contactId).set(contactData);
+            // Add to multipath update using foundUserId as the key
+            multiPathUpdate["emergency_contacts/${user!.uid}/$foundUserId"] =
+                myContactData;
+
+            // 2. Add current user as a contact for the other user using current user's UID as key
+            if (currentUserPhone != null) {
+              // Create the contact data for the other user
+              Map<String, dynamic> otherContactData = {
+                'name': currentUserName,
+                'phone': currentUserPhone,
+                'status_activate': true,
+                'uid': foundUserId,
+                'connected_uid': user!.uid,
+                'timestamp': ServerValue.timestamp,
+                'is_connected_user': true,
+                'share_location': true,
+              };
+
+              // Add to multipath update using current user's UID as the key
+              multiPathUpdate["emergency_contacts/$foundUserId/${user!.uid}"] =
+                  otherContactData;
+            }
+
+            // Execute the multipath update
+            await _database.ref().update(multiPathUpdate);
 
             // Show success message
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('User connected successfully'),
+                content: Text(
+                  'User connected successfully (bidirectional connection created)',
+                ),
                 backgroundColor: Colors.green,
               ),
             );
@@ -580,9 +747,6 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                 backgroundColor: Colors.orange,
               ),
             );
-            setState(() {
-              _isConnecting = false;
-            });
           }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -591,9 +755,6 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
               backgroundColor: Colors.red,
             ),
           );
-          setState(() {
-            _isConnecting = false;
-          });
         }
       } catch (e) {
         print('Error connecting with user: $e');
@@ -603,6 +764,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
             backgroundColor: Colors.red,
           ),
         );
+      } finally {
         setState(() {
           _isConnecting = false;
         });
@@ -766,6 +928,8 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                   final bool isConnectedUser =
                       contact['is_connected_user'] ?? false;
                   final String? connectedUid = contact['connected_uid'];
+                  final bool sharingLocation =
+                      contact['share_location'] ?? true;
 
                   return Card(
                     margin: const EdgeInsets.symmetric(
@@ -773,99 +937,131 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                       vertical: 8,
                     ),
                     elevation: 2,
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor:
-                            isConnectedUser
-                                ? Colors.blue[100]
-                                : Colors.red[100],
-                        child: Icon(
-                          isConnectedUser ? Icons.people : Icons.person,
-                          color: isConnectedUser ? Colors.blue : Colors.red,
-                        ),
-                      ),
-                      title: Text(
-                        contact['name'],
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.phone,
-                                size: 16,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(contact['phone']),
-                            ],
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                isConnectedUser
+                                    ? Colors.blue[100]
+                                    : Colors.red[100],
+                            child: Icon(
+                              isConnectedUser ? Icons.people : Icons.person,
+                              color: isConnectedUser ? Colors.blue : Colors.red,
+                            ),
                           ),
-                          if (isConnectedUser)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Row(
+                          title: Text(
+                            contact['name'],
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
                                 children: [
-                                  Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue,
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      'Connected User',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.white,
-                                      ),
-                                    ),
+                                  const Icon(
+                                    Icons.phone,
+                                    size: 16,
+                                    color: Colors.grey,
                                   ),
+                                  const SizedBox(width: 4),
+                                  Text(contact['phone']),
                                 ],
                               ),
-                            ),
-                        ],
-                      ),
-                      // Add onTap to show user details if this is a connected user
-                      onTap:
-                          isConnectedUser && connectedUid != null
-                              ? () => _showConnectedUserDetails(connectedUid)
-                              : null,
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder:
-                                (context) => AlertDialog(
-                                  title: const Text('Delete Contact'),
-                                  content: Text(
-                                    'Are you sure you want to delete ${contact['name']} from your emergency contacts?',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(context),
-                                      child: const Text('CANCEL'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () {
-                                        _deleteContact(contact['id']);
-                                        Navigator.pop(context);
-                                      },
-                                      child: const Text(
-                                        'DELETE',
-                                        style: TextStyle(color: Colors.red),
+                              if (isConnectedUser)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue,
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'Connected User',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                          );
-                        },
-                      ),
+                            ],
+                          ),
+                          // Add onTap to show user details if this is a connected user
+                          onTap:
+                              isConnectedUser && connectedUid != null
+                                  ? () =>
+                                      _showConnectedUserDetails(connectedUid)
+                                  : null,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder:
+                                    (context) => AlertDialog(
+                                      title: const Text('Delete Contact'),
+                                      content: Text(
+                                        'Are you sure you want to delete ${contact['name']} from your emergency contacts?',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed:
+                                              () => Navigator.pop(context),
+                                          child: const Text('CANCEL'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            _deleteContact(contact['id']);
+                                            Navigator.pop(context);
+                                          },
+                                          child: const Text(
+                                            'DELETE',
+                                            style: TextStyle(color: Colors.red),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                              );
+                            },
+                          ),
+                        ),
+                        // Only show the location sharing switch for connected users
+                        if (isConnectedUser)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Share my location with this contact',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                                Switch(
+                                  value: sharingLocation,
+                                  activeColor: Colors.blue,
+                                  onChanged: (bool value) {
+                                    _updateSharingStatus(contact['id'], value);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -877,7 +1073,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
               : Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // Connect Users Button
+                  // Connect Users Button - remove heroTag property
                   FloatingActionButton.extended(
                     onPressed: () {
                       // Clear controller
@@ -954,10 +1150,9 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                       style: TextStyle(color: Colors.white),
                     ),
                     backgroundColor: Colors.blue,
-                    heroTag: 'connectUsers',
                   ),
-                  const SizedBox(width: 10), // Space between buttons
-                  // Original Add Contact Button
+                  const SizedBox(width: 10),
+                  // Original Add Contact Button - remove heroTag property
                   FloatingActionButton(
                     onPressed: () {
                       nameController.clear();
@@ -1017,7 +1212,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                     },
                     backgroundColor: Colors.red,
                     child: const Icon(Icons.add, color: Colors.white),
-                    heroTag: 'addContact',
+                    // Removed heroTag property
                   ),
                 ],
               ),
