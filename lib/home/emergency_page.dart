@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EmergencyDialog {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -19,6 +20,63 @@ class EmergencyDialog {
   static const String apiKey = "ebced0ed69d67b826ef466fda6bd533b";
   static const String senderName = "Trike";
   static const String apiUrl = "https://semaphore.co/api/v4/messages";
+
+  // Anti-spam protection: track alert status
+  static DateTime? _lastAlertTime;
+  static bool _isAlertInProgress = false;
+  static const int _cooldownPeriodSeconds = 120; // 2-minute cooldown
+
+  /// Save alert timestamp to shared preferences for persistence
+  static Future<void> _saveAlertTimestamp() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        'last_emergency_alert_time',
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (e) {
+      print("❌ Error saving alert timestamp: $e");
+    }
+  }
+
+  /// Load last alert timestamp from shared preferences
+  static Future<void> _loadLastAlertTime() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastTimestamp = prefs.getInt('last_emergency_alert_time');
+
+      if (lastTimestamp != null) {
+        _lastAlertTime = DateTime.fromMillisecondsSinceEpoch(lastTimestamp);
+        print("📅 Loaded last alert time: $_lastAlertTime");
+      }
+    } catch (e) {
+      print("❌ Error loading alert timestamp: $e");
+    }
+  }
+
+  /// Check if an alert can be sent based on cooldown period
+  static Future<bool> _canSendAlert() async {
+    // Load the last alert time from persistent storage
+    await _loadLastAlertTime();
+
+    // If an alert is currently in progress, prevent sending a new one
+    if (_isAlertInProgress) {
+      print("⚠️ Alert sending already in progress");
+      return false;
+    }
+
+    // Check if we've attempted to send an alert recently
+    final now = DateTime.now();
+    if (_lastAlertTime != null) {
+      final timeSince = now.difference(_lastAlertTime!);
+      if (timeSince.inSeconds < _cooldownPeriodSeconds) {
+        print("⚠️ Last alert was sent only ${timeSince.inSeconds} seconds ago");
+        return false;
+      }
+    }
+
+    return true;
+  }
 
   /// Fetch emergency contacts from Firebase - UPDATED to use UID structure
   static Future<List<Map<String, dynamic>>> _fetchEmergencyContacts() async {
@@ -292,7 +350,7 @@ class EmergencyDialog {
     }
   }
 
-  /// Send SMS alerts to emergency contacts - IMPROVED
+  /// Send SMS alerts to emergency contacts - IMPROVED with deduplication
   static Future<Map<String, dynamic>> _sendSmsAlerts(
     List<Map<String, dynamic>> contacts,
     Position? position,
@@ -300,12 +358,47 @@ class EmergencyDialog {
     Map<String, dynamic> result = {
       'success': false,
       'sent': 0,
-      'total': contacts.length,
+      'total': 0, // Will update this after deduplication
       'messages': [],
     };
 
     if (contacts.isEmpty) {
       print("No contacts available to send alerts");
+      return result;
+    }
+
+    // Create a Set to track unique phone numbers to prevent duplicate messages
+    final Set<String> processedPhones = {};
+
+    // Filter for unique contacts only to prevent spamming
+    final uniqueContacts =
+        contacts.where((contact) {
+          final phone = contact['phone'].toString();
+          final formattedPhone = _formatPhoneNumber(phone);
+
+          if (formattedPhone.isEmpty) {
+            print("❌ Invalid phone format for ${contact['name']}: $phone");
+            return false;
+          }
+
+          // If this phone number already exists in our set, skip it
+          if (processedPhones.contains(formattedPhone)) {
+            print(
+              "⚠️ Skipping duplicate contact: ${contact['name']} ($formattedPhone)",
+            );
+            return false;
+          }
+
+          // Otherwise add it to our set and keep it
+          processedPhones.add(formattedPhone);
+          return true;
+        }).toList();
+
+    // Update total with deduplicated count
+    result['total'] = uniqueContacts.length;
+
+    if (uniqueContacts.isEmpty) {
+      print("No valid contacts after deduplication");
       return result;
     }
 
@@ -325,10 +418,10 @@ class EmergencyDialog {
     String message = "$fullName needs immediate help! $locationText";
     print("Message content: $message");
 
-    // Process each contact individually instead of bulk
+    // Process each unique contact individually
     int successCount = 0;
 
-    for (var contact in contacts) {
+    for (var contact in uniqueContacts) {
       String phone = contact['phone'];
       String contactName = contact['name'];
       bool isAdmin = contact['isAdmin'] ?? false;
@@ -495,6 +588,32 @@ class EmergencyDialog {
   /// Shows an emergency alert dialog with confirmation options
   /// Returns true if the alert was sent, false otherwise
   static Future<bool> show(BuildContext context) async {
+    // Check if it's allowed to send an alert (cooldown period)
+    bool canSend = await _canSendAlert();
+    if (!canSend) {
+      // Show cooldown message to user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.timer, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Please wait before sending another emergency alert',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return false;
+    }
+
     bool alertSent = false;
 
     await showDialog(
@@ -548,81 +667,95 @@ class EmergencyDialog {
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: () async {
-                // Show loading dialog
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (BuildContext context) {
-                    return Dialog(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20.0),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(width: 20),
-                            Text("Sending alerts..."),
-                          ],
+                // Set alert in progress flag
+                _isAlertInProgress = true;
+
+                try {
+                  // Show loading dialog
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (BuildContext context) {
+                      return Dialog(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20.0),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(width: 20),
+                              Text("Sending alerts..."),
+                            ],
+                          ),
                         ),
+                      );
+                    },
+                  );
+
+                  // Get emergency contacts and admin contacts
+                  final userContacts = await _fetchEmergencyContacts();
+                  final adminContacts = await _fetchAdminContacts();
+
+                  // Combine both lists
+                  final allContacts = [...userContacts, ...adminContacts];
+
+                  // Get current location
+                  final position = await _getCurrentLocation();
+
+                  // Send SMS alerts to all contacts
+                  final result = await _sendSmsAlerts(allContacts, position);
+
+                  // Close loading dialog
+                  Navigator.of(context).pop();
+
+                  // Close the dialog
+                  Navigator.of(context).pop();
+
+                  // Set flag and show confirmation
+                  alertSent = result['success'];
+
+                  // If sent successfully, save the timestamp
+                  if (alertSent) {
+                    _lastAlertTime = DateTime.now();
+                    await _saveAlertTimestamp();
+                  }
+
+                  // Show confirmation or error snackbar based on success
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(
+                            result['success']
+                                ? Icons.check_circle
+                                : Icons.warning,
+                            color: Colors.white,
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            result['success']
+                                ? 'Emergency Alert Sent to ${result['sent']} of ${result['total']} contacts'
+                                : 'Error sending alerts. Please try again.',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                );
-
-                // Get emergency contacts and admin contacts
-                final userContacts = await _fetchEmergencyContacts();
-                final adminContacts = await _fetchAdminContacts();
-
-                // Combine both lists
-                final allContacts = [...userContacts, ...adminContacts];
-
-                // Get current location
-                final position = await _getCurrentLocation();
-
-                // Send SMS alerts to all contacts
-                final result = await _sendSmsAlerts(allContacts, position);
-
-                // Close loading dialog
-                Navigator.of(context).pop();
-
-                // Close the dialog
-                Navigator.of(context).pop();
-
-                // Set flag and show confirmation
-                alertSent = result['success'];
-
-                // Show confirmation or error snackbar based on success
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        Icon(
+                      backgroundColor:
                           result['success']
-                              ? Icons.check_circle
-                              : Icons.warning,
-                          color: Colors.white,
-                        ),
-                        SizedBox(width: 10),
-                        Text(
-                          result['success']
-                              ? 'Emergency Alert Sent to ${result['sent']} of ${result['total']} contacts'
-                              : 'Error sending alerts. Please try again.',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ],
+                              ? Colors.green.shade700
+                              : Colors.orange.shade700,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      margin: EdgeInsets.all(10),
+                      duration: Duration(seconds: 3),
                     ),
-                    backgroundColor:
-                        result['success']
-                            ? Colors.green.shade700
-                            : Colors.orange.shade700,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    margin: EdgeInsets.all(10),
-                    duration: Duration(seconds: 3),
-                  ),
-                );
+                  );
+                } finally {
+                  // Always release the lock
+                  _isAlertInProgress = false;
+                }
               },
             ),
           ],
@@ -635,9 +768,50 @@ class EmergencyDialog {
     return alertSent;
   }
 
-  /// Shows an enhanced emergency alert dialog with SMS functionality
+  /// Shows an enhanced emergency alert dialog with SMS functionality and anti-spam protection
   /// Returns true if the alert was sent, false otherwise
   static Future<bool> showEnhanced(BuildContext context) async {
+    // Check if it's allowed to send an alert (cooldown period)
+    bool canSend = await _canSendAlert();
+    if (!canSend) {
+      // Calculate remaining cooldown time
+      int remainingSeconds = _cooldownPeriodSeconds;
+      if (_lastAlertTime != null) {
+        remainingSeconds =
+            _cooldownPeriodSeconds -
+            DateTime.now().difference(_lastAlertTime!).inSeconds;
+        if (remainingSeconds < 0) remainingSeconds = 0;
+      }
+
+      // Format remaining time
+      String timeText =
+          remainingSeconds > 60
+              ? "${(remainingSeconds / 60).ceil()} minutes"
+              : "$remainingSeconds seconds";
+
+      // Show cooldown message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.timer, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Please wait $timeText before sending another alert',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return false;
+    }
+
     bool alertSent = false;
     bool isLoading = false;
 
@@ -804,82 +978,98 @@ class EmergencyDialog {
                                     isLoading = true;
                                   });
 
-                                  // Get emergency contacts and admin contacts
-                                  final userContacts =
-                                      await _fetchEmergencyContacts();
-                                  final adminContacts =
-                                      await _fetchAdminContacts();
+                                  // Set alert in progress flag
+                                  _isAlertInProgress = true;
 
-                                  // Combine both lists
-                                  final allContacts = [
-                                    ...userContacts,
-                                    ...adminContacts,
-                                  ];
+                                  try {
+                                    // Get emergency contacts and admin contacts
+                                    final userContacts =
+                                        await _fetchEmergencyContacts();
+                                    final adminContacts =
+                                        await _fetchAdminContacts();
 
-                                  // Get current location
-                                  final position = await _getCurrentLocation();
+                                    // Combine both lists
+                                    final allContacts = [
+                                      ...userContacts,
+                                      ...adminContacts,
+                                    ];
 
-                                  // Send SMS alerts to all contacts
-                                  final result = await _sendSmsAlerts(
-                                    allContacts,
-                                    position,
-                                  );
+                                    // Get current location
+                                    final position =
+                                        await _getCurrentLocation();
 
-                                  // Set alert sent flag
-                                  alertSent = result['success'];
+                                    // Send SMS alerts to all contacts
+                                    final result = await _sendSmsAlerts(
+                                      allContacts,
+                                      position,
+                                    );
 
-                                  // Close dialog
-                                  Navigator.of(context).pop();
+                                    // Set alert sent flag and save timestamp
+                                    alertSent = result['success'];
+                                    if (alertSent) {
+                                      _lastAlertTime = DateTime.now();
+                                      await _saveAlertTimestamp();
+                                    }
 
-                                  // Show confirmation snackbar
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Row(
-                                        children: [
-                                          Icon(
-                                            result['success']
-                                                ? Icons.check_circle
-                                                : Icons.warning,
-                                            color: Colors.white,
-                                          ),
-                                          SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  result['success']
-                                                      ? 'Emergency Alert Sent'
-                                                      : 'Alert Sent with Errors',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  '${result['sent']} of ${result['total']} contacts notified',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ],
+                                    // Close dialog
+                                    Navigator.of(context).pop();
+
+                                    // Show confirmation snackbar
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Row(
+                                          children: [
+                                            Icon(
+                                              result['success']
+                                                  ? Icons.check_circle
+                                                  : Icons.warning,
+                                              color: Colors.white,
                                             ),
+                                            SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    result['success']
+                                                        ? 'Emergency Alert Sent'
+                                                        : 'Alert Sent with Errors',
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    '${result['sent']} of ${result['total']} contacts notified',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        backgroundColor:
+                                            result['success']
+                                                ? Colors.green.shade700
+                                                : Colors.orange.shade700,
+                                        behavior: SnackBarBehavior.floating,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
                                           ),
-                                        ],
+                                        ),
+                                        margin: EdgeInsets.all(10),
+                                        duration: Duration(seconds: 4),
                                       ),
-                                      backgroundColor:
-                                          result['success']
-                                              ? Colors.green.shade700
-                                              : Colors.orange.shade700,
-                                      behavior: SnackBarBehavior.floating,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      margin: EdgeInsets.all(10),
-                                      duration: Duration(seconds: 4),
-                                    ),
-                                  );
+                                    );
+                                  } finally {
+                                    // Always release the in-progress flag
+                                    _isAlertInProgress = false;
+                                  }
                                 },
                               ),
                             ),

@@ -19,10 +19,13 @@ class LocationSearchService {
       final String url =
           'https://nominatim.openstreetmap.org/search?q=$encodedQuery+philippines&format=json&countrycodes=ph&limit=5';
 
-      final response = await http.get(Uri.parse(url), headers: {
-        'User-Agent': 'RideShareApp', // Required by Nominatim's policy
-        'Accept-Language': 'en' // Get results in English
-      });
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'User-Agent': 'RideShareApp', // Required by Nominatim's policy
+          'Accept-Language': 'en', // Get results in English
+        },
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
@@ -31,27 +34,34 @@ class LocationSearchService {
           for (final place in data) {
             String name = place['name'] ?? '';
             if (name.isEmpty) {
-              final displayNameParts =
-                  place['display_name'].toString().split(',');
+              final displayNameParts = place['display_name'].toString().split(
+                ',',
+              );
               name = displayNameParts.first.trim();
             }
 
             // Extract a cleaner secondary text from display_name
-            final displayNameParts =
-                place['display_name'].toString().split(',');
-            String secondaryText = displayNameParts.length > 1
-                ? displayNameParts.sublist(1).take(3).join(', ').trim()
-                : "Philippines";
+            final displayNameParts = place['display_name'].toString().split(
+              ',',
+            );
+            String secondaryText =
+                displayNameParts.length > 1
+                    ? displayNameParts.sublist(1).take(3).join(', ').trim()
+                    : "Philippines";
 
-            results.add(LocalPrediction(
-              placeId: place['place_id'].toString(),
-              mainText: name,
-              secondaryText: secondaryText,
-              description: place['display_name'].toString(),
-              coordinates: LatLng(double.parse(place['lat'].toString()),
-                  double.parse(place['lon'].toString())),
-              isOnlineResult: true,
-            ));
+            results.add(
+              LocalPrediction(
+                placeId: place['place_id'].toString(),
+                mainText: name,
+                secondaryText: secondaryText,
+                description: place['display_name'].toString(),
+                coordinates: LatLng(
+                  double.parse(place['lat'].toString()),
+                  double.parse(place['lon'].toString()),
+                ),
+                isOnlineResult: true,
+              ),
+            );
           }
         }
       }
@@ -70,9 +80,10 @@ class LocationSearchService {
       final String url =
           'https://nominatim.openstreetmap.org/search?q=$encodedAddress+philippines&format=json&limit=1&countrycodes=ph';
 
-      final response = await http.get(Uri.parse(url), headers: {
-        'User-Agent': 'RideShareApp',
-      });
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'User-Agent': 'RideShareApp'},
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
@@ -87,8 +98,9 @@ class LocationSearchService {
       }
 
       // Fallback to built-in geocoding if Nominatim fails
-      List<Location> locations =
-          await locationFromAddress("$address, Philippines");
+      List<Location> locations = await locationFromAddress(
+        "$address, Philippines",
+      );
       if (locations.isNotEmpty) {
         return LatLng(locations[0].latitude, locations[0].longitude);
       }
@@ -97,8 +109,9 @@ class LocationSearchService {
 
       // Try built-in geocoding as fallback
       try {
-        List<Location> locations =
-            await locationFromAddress("$address, Philippines");
+        List<Location> locations = await locationFromAddress(
+          "$address, Philippines",
+        );
         if (locations.isNotEmpty) {
           return LatLng(locations[0].latitude, locations[0].longitude);
         }
@@ -113,7 +126,9 @@ class LocationSearchService {
 
   // Try to match text input with existing predictions
   static LatLng? matchTextWithPredictions(
-      String input, List<LocalPrediction> predictions) {
+    String input,
+    List<LocalPrediction> predictions,
+  ) {
     final lowercaseInput = input.toLowerCase();
 
     // Check exact matches first

@@ -408,6 +408,9 @@ class _LocationInputPageState extends State<LocationInputPage>
 
     setState(() {
       _isLoadingDestination = true;
+      // Make sure to display suggestions once we start loading
+      _shouldShowSuggestions = true;
+      _suggestionsAnimationController.forward();
     });
 
     // Step 1: Check local suggestions first (fast response)
@@ -445,7 +448,72 @@ class _LocationInputPageState extends State<LocationInputPage>
       });
     }
 
-    // Rest of the method remains the same...
+    // Step 2: Search online for more results
+    try {
+      List<LocalPrediction> searchResults =
+          await LocationSearchService.searchLocations(query);
+
+      if (mounted) {
+        setState(() {
+          // Keep existing local results and add online results
+          if (searchResults.isNotEmpty) {
+            // Add online results to existing local results
+            _destinationPredictions.addAll(searchResults);
+
+            // Remove any duplicates that might exist
+            final seenPlaceIds = <String>{};
+            _destinationPredictions =
+                _destinationPredictions.where((prediction) {
+                  final isDuplicate = seenPlaceIds.contains(prediction.placeId);
+                  seenPlaceIds.add(prediction.placeId);
+                  return !isDuplicate;
+                }).toList();
+
+            // Cap at maximum 7 results for better UX
+            if (_destinationPredictions.length > 7) {
+              _destinationPredictions = _destinationPredictions.sublist(0, 7);
+            }
+          }
+
+          // Always add a "search more" option if we have any results
+          if (_destinationPredictions.isNotEmpty) {
+            // Check if we already have a search more option
+            bool hasSearchMoreOption = _destinationPredictions.any(
+              (p) => p.isSearchMore,
+            );
+            if (!hasSearchMoreOption) {
+              _destinationPredictions.add(
+                LocationSuggestionService.getSearchMoreOption(),
+              );
+            }
+          }
+
+          _isLoadingDestination = false;
+          _displaySuggestions();
+        });
+      }
+    } catch (e) {
+      print("❌ Error searching online: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingDestination = false;
+
+          // Even if online search failed, make sure we still show local results
+          if (_destinationPredictions.isEmpty && localResults.isNotEmpty) {
+            _destinationPredictions = localResults;
+            _displaySuggestions();
+          }
+
+          // Add search more option if we have results
+          if (_destinationPredictions.isNotEmpty &&
+              !_destinationPredictions.any((p) => p.isSearchMore)) {
+            _destinationPredictions.add(
+              LocationSuggestionService.getSearchMoreOption(),
+            );
+          }
+        });
+      }
+    }
   }
 
   Future<void> _searchPickup(String query) async {
