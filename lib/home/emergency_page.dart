@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -5,7 +7,11 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trike/home/emergency_record.dart';
 
 class EmergencyDialog {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -20,6 +26,9 @@ class EmergencyDialog {
   static const String apiKey = "ebced0ed69d67b826ef466fda6bd533b";
   static const String senderName = "Trike";
   static const String apiUrl = "https://semaphore.co/api/v4/messages";
+  static AudioRecorder _recorder = AudioRecorder();
+  static Timer? _recordingTimer;
+  static bool _recordingAutoStopped = false;
 
   // Anti-spam protection: track alert status
   static DateTime? _lastAlertTime;
@@ -972,49 +981,67 @@ class EmergencyDialog {
                                     fontSize: 16,
                                   ),
                                 ),
+
+                                // In the EmergencyDialog class, update the onPressed method
                                 onPressed: () async {
-                                  // Set loading state
                                   setState(() {
                                     isLoading = true;
                                   });
 
-                                  // Set alert in progress flag
                                   _isAlertInProgress = true;
+                                  String? recordedPath;
 
                                   try {
-                                    // Get emergency contacts and admin contacts
+                                    // Initialize the recording helper with the public directory
+                                    await AudioRecorderHelper.initializePublicDirectory();
+
+                                    // Start recording with MP3 format and a custom emergency-related filename with date/time
+                                    final now = DateTime.now();
+                                    final dateStr =
+                                        "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                                    final timeStr =
+                                        "${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}-${now.second.toString().padLeft(2, '0')}";
+
+                                    recordedPath =
+                                        await AudioRecorderHelper.startRecording(
+                                          durationMinutes: 3,
+                                          completeFullDuration:
+                                              true, // Ensure it runs for the full 3 minutes
+                                          format:
+                                              AudioFormat.mp3, // Use MP3 format
+                                          customFilename:
+                                              'emergency_${dateStr}_${timeStr}', // Custom filename with date and time
+                                        );
+
                                     final userContacts =
                                         await _fetchEmergencyContacts();
                                     final adminContacts =
                                         await _fetchAdminContacts();
-
-                                    // Combine both lists
                                     final allContacts = [
                                       ...userContacts,
                                       ...adminContacts,
                                     ];
 
-                                    // Get current location
                                     final position =
                                         await _getCurrentLocation();
-
-                                    // Send SMS alerts to all contacts
                                     final result = await _sendSmsAlerts(
                                       allContacts,
                                       position,
                                     );
 
-                                    // Set alert sent flag and save timestamp
                                     alertSent = result['success'];
                                     if (alertSent) {
                                       _lastAlertTime = DateTime.now();
                                       await _saveAlertTimestamp();
                                     }
 
-                                    // Close dialog
                                     Navigator.of(context).pop();
 
-                                    // Show confirmation snackbar
+                                    // Get the recordings directory to inform the user
+                                    final recordingsDir =
+                                        AudioRecorderHelper.getRecordingsDirectoryPath() ??
+                                        'device storage';
+
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Row(
@@ -1047,6 +1074,25 @@ class EmergencyDialog {
                                                       fontSize: 12,
                                                     ),
                                                   ),
+                                                  FutureBuilder<bool>(
+                                                    future:
+                                                        AudioRecorderHelper.isRecording(),
+                                                    builder: (
+                                                      context,
+                                                      snapshot,
+                                                    ) {
+                                                      if (snapshot.data ==
+                                                          true) {
+                                                        return Text(
+                                                          'Recording in progress (saved to Recordings folder)',
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                          ),
+                                                        );
+                                                      }
+                                                      return SizedBox.shrink();
+                                                    },
+                                                  ),
                                                 ],
                                               ),
                                             ),
@@ -1066,8 +1112,15 @@ class EmergencyDialog {
                                         duration: Duration(seconds: 4),
                                       ),
                                     );
+                                  } catch (e) {
+                                    print('Error during alert: $e');
+
+                                    // Stop recording only if there was an error with the alert process
+                                    if (await AudioRecorderHelper.isRecording()) {
+                                      await AudioRecorderHelper.forceStopRecording();
+                                    }
                                   } finally {
-                                    // Always release the in-progress flag
+                                    // Notice we're NOT stopping the recording here, letting it complete the full 3 minutes
                                     _isAlertInProgress = false;
                                   }
                                 },
