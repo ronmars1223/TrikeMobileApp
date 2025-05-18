@@ -48,6 +48,116 @@ class EmergencyDialog {
     }
   }
 
+  static Future<void> _saveEmergencyLocationToFirebase(
+    Position position,
+    Map<String, String> userInfo,
+  ) async {
+    User? user = _auth.currentUser;
+
+    if (user != null && position != null) {
+      try {
+        // Generate a unique ID for this emergency
+        final now = DateTime.now();
+        final emergencyId = '${user.uid}_${now.millisecondsSinceEpoch}';
+
+        // Create a reference to admin_emergency node in Realtime Database
+        DatabaseReference emergencyRef = _database.ref(
+          'admin_emergency/$emergencyId',
+        );
+
+        // Create the emergency data
+        Map<String, dynamic> emergencyData = {
+          'uid': user.uid,
+          'timestamp': ServerValue.timestamp, // Firebase server timestamp
+          'datetime':
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+          'location': {
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'accuracy': position.accuracy,
+            'altitude': position.altitude,
+            'speed': position.speed,
+            'speedAccuracy': position.speedAccuracy,
+            'heading': position.heading,
+            'timestamp': position.timestamp?.millisecondsSinceEpoch,
+          },
+          'user': {
+            'uid': user.uid,
+            'email': user.email,
+            'phone': user.phoneNumber,
+            'firstName': userInfo['firstName'] ?? '',
+            'lastName': userInfo['lastName'] ?? '',
+            'fullName': userInfo['fullName'] ?? '',
+          },
+          'status':
+              'pending', // For admin management (pending, processing, resolved)
+          'notes': '', // For admin notes
+        };
+
+        // Save the emergency data to Realtime Database
+        await emergencyRef.set(emergencyData);
+
+        // Create Google Maps URL for easy access
+        String mapsUrl =
+            "https://maps.google.com/maps?q=${position.latitude},${position.longitude}";
+
+        // Create a separate entry with just the essential information for quicker access
+        DatabaseReference emergencyQuickRef = _database.ref(
+          'admin_emergency_quick/$emergencyId',
+        );
+        await emergencyQuickRef.set({
+          'uid': user.uid,
+          'name': userInfo['fullName'] ?? 'App User',
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'maps_url': mapsUrl,
+          'timestamp': ServerValue.timestamp,
+          'datetime':
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+          'status': 'pending',
+        });
+
+        // Update user's current location with emergency flag
+        DatabaseReference userLocationRef = _database.ref(
+          'users/${user.uid}/current_location',
+        );
+
+        // Merge emergency data with current location
+        Map<String, dynamic> userLocationUpdate = {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'timestamp': ServerValue.timestamp,
+          'emergency': true,
+          'emergencyId': emergencyId,
+          'maps_url': mapsUrl,
+          'lastUpdated':
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+        };
+
+        // Keep any existing user data in the current_location
+        if (userInfo['firstName']?.isNotEmpty ?? false) {
+          userLocationUpdate['firstName'] = userInfo['firstName'];
+        }
+
+        if (userInfo['lastName']?.isNotEmpty ?? false) {
+          userLocationUpdate['lastName'] = userInfo['lastName'];
+        }
+
+        // Update the user's current location in Realtime Database
+        await userLocationRef.update(userLocationUpdate);
+
+        print('✅ Emergency location saved to admin_emergency/$emergencyId');
+        print(
+          '✅ Quick access data saved to admin_emergency_quick/$emergencyId',
+        );
+      } catch (e) {
+        print(
+          '❌ Error saving emergency location to Firebase Realtime Database: $e',
+        );
+      }
+    }
+  }
+
   /// Load last alert timestamp from shared preferences
   static Future<void> _loadLastAlertTime() async {
     try {
@@ -1013,6 +1123,28 @@ class EmergencyDialog {
                                               'emergency_${dateStr}_${timeStr}', // Custom filename with date and time
                                         );
 
+                                    // Get user info first
+                                    final userInfo = await _getUserInfo();
+
+                                    // Get user's current location
+                                    final position =
+                                        await _getCurrentLocation();
+
+                                    // IMPORTANT: First save emergency location to the Realtime Database
+                                    // This ensures the location is recorded even if sending SMS fails
+                                    if (position != null) {
+                                      await _saveEmergencyLocationToFirebase(
+                                        position,
+                                        userInfo,
+                                      );
+                                    } else {
+                                      // If we couldn't get the location, log the error but continue with the alert
+                                      print(
+                                        '⚠️ Warning: Unable to get current location for emergency alert',
+                                      );
+                                    }
+
+                                    // Fetch all contacts
                                     final userContacts =
                                         await _fetchEmergencyContacts();
                                     final adminContacts =
@@ -1022,8 +1154,7 @@ class EmergencyDialog {
                                       ...adminContacts,
                                     ];
 
-                                    final position =
-                                        await _getCurrentLocation();
+                                    // Send SMS alerts
                                     final result = await _sendSmsAlerts(
                                       allContacts,
                                       position,
@@ -1035,13 +1166,10 @@ class EmergencyDialog {
                                       await _saveAlertTimestamp();
                                     }
 
+                                    // Dismiss the dialog
                                     Navigator.of(context).pop();
 
-                                    // Get the recordings directory to inform the user
-                                    final recordingsDir =
-                                        AudioRecorderHelper.getRecordingsDirectoryPath() ??
-                                        'device storage';
-
+                                    // Show confirmation message
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Row(
@@ -1070,6 +1198,15 @@ class EmergencyDialog {
                                                   ),
                                                   Text(
                                                     '${result['sent']} of ${result['total']} contacts notified',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                  // This additional message confirms the location was saved
+                                                  Text(
+                                                    position != null
+                                                        ? 'Your location was shared with emergency services'
+                                                        : 'Unable to share your location',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                     ),
@@ -1115,6 +1252,31 @@ class EmergencyDialog {
                                   } catch (e) {
                                     print('Error during alert: $e');
 
+                                    // Close the dialog even if there was an error
+                                    Navigator.of(context).pop();
+
+                                    // Show error message
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.error,
+                                              color: Colors.white,
+                                            ),
+                                            SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                'Error sending emergency alert: ${e.toString()}',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        backgroundColor: Colors.red.shade700,
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+
                                     // Stop recording only if there was an error with the alert process
                                     if (await AudioRecorderHelper.isRecording()) {
                                       await AudioRecorderHelper.forceStopRecording();
@@ -1122,6 +1284,11 @@ class EmergencyDialog {
                                   } finally {
                                     // Notice we're NOT stopping the recording here, letting it complete the full 3 minutes
                                     _isAlertInProgress = false;
+
+                                    // Reset loading state if the dialog is still showing
+                                    setState(() {
+                                      isLoading = false;
+                                    });
                                   }
                                 },
                               ),
