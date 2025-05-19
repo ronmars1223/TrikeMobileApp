@@ -15,7 +15,7 @@ import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platf
 enum TransportMode { car, motorcycle, walking }
 
 class GoogleMapWidget extends StatefulWidget {
-  const GoogleMapWidget({Key? key}) : super(key: key);
+  const GoogleMapWidget({super.key});
 
   @override
   GoogleMapWidgetState createState() => GoogleMapWidgetState();
@@ -35,7 +35,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   bool _isTripInfoVisible = true;
   bool _trafficEnabled = true; // Always true for traffic
   double _trafficMultiplier = 1.0;
-  String _nightStyle = '''[
+  final String _nightStyle = '''[
     {"elementType": "geometry", "stylers": [{"color": "#242f3e"}]},
     {"elementType": "labels.text.fill", "stylers": [{"color": "#746855"}]},
     {"elementType": "labels.text.stroke", "stylers": [{"color": "#242f3e"}]},
@@ -50,8 +50,8 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   static const LatLng _defaultUserLocation = LatLng(8.4542, 124.6319);
 
   // Route and navigation
-  Set<Marker> _markers = {};
-  Set<Polyline> _polylines = {};
+  final Set<Marker> _markers = {};
+  final Set<Polyline> _polylines = {};
   String? _destination;
   String? _pickup;
   LatLng? _destinationCoords;
@@ -62,10 +62,10 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   String _routeDuration = "";
   bool _isLoadingDirections = false;
   String _routeType = "Fastest Route";
-  TransportMode _selectedTransportMode = TransportMode.car;
+  final TransportMode _selectedTransportMode = TransportMode.car;
   bool _hasNotifiedEmergencyContacts = false;
   bool _hasArrivedAtDestination = false;
-  double _arrivalThresholdDistance = 0.5;
+  final double _arrivalThresholdDistance = 0.5;
   bool _isNotificationInProgress = false;
   DateTime? _lastNotificationAttempt;
 
@@ -343,7 +343,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   Future<void> _animateToCurrentLocation({double zoom = 14.0}) async {
     try {
       final controller = await _mapController.future;
-      if (controller != null && _currentPosition != null && mounted) {
+      if (_currentPosition != null && mounted) {
         controller.animateCamera(
           CameraUpdate.newCameraPosition(
             CameraPosition(
@@ -445,11 +445,23 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       _countdownTimer = null;
     }
 
+    // Reset notification flags when starting a new countdown
+    setState(() {
+      _hasNotifiedEmergencyContacts = false;
+      _isNotificationInProgress = false;
+      _lastNotificationAttempt = null;
+      _hasArrivedAtDestination = false;
+    });
+
     _estimatedArrivalTime = DateTime.now().add(duration);
     _updateCountdownText();
     _countdownTimer = Timer.periodic(
       Duration(seconds: 1),
       (_) => _updateCountdownText(),
+    );
+
+    print(
+      "⏱️ Started countdown timer: ${duration.inMinutes} minutes ${duration.inSeconds % 60} seconds",
     );
   }
 
@@ -470,17 +482,22 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       setState(() => _countdownText = "Time's up!");
 
       // Send notification ONLY ONCE when time is up and not arrived yet
-      if (!_hasNotifiedEmergencyContacts && !_hasArrivedAtDestination) {
-        // Set the flag to true BEFORE sending messages to prevent duplicate calls
-        setState(() {
-          _hasNotifiedEmergencyContacts = true;
-        });
-
+      if (!_hasNotifiedEmergencyContacts &&
+          !_hasArrivedAtDestination &&
+          !_isNotificationInProgress) {
         print("⚠️ TIME'S UP! Sending emergency notifications now...");
-        _notifyEmergencyContacts();
 
         // Cancel the timer to prevent further checks
         _countdownTimer?.cancel();
+
+        // Trigger notification with a slight delay to ensure state is updated
+        Future.delayed(Duration(milliseconds: 500), () {
+          if (mounted &&
+              !_hasNotifiedEmergencyContacts &&
+              !_hasArrivedAtDestination) {
+            _notifyEmergencyContacts();
+          }
+        });
       }
       return;
     }
@@ -562,12 +579,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     }
 
     // Set locks to prevent concurrent or repeated calls
-    _isNotificationInProgress = true;
-    _lastNotificationAttempt = now;
-
-    // Mark as notified immediately to prevent duplicate calls
     setState(() {
-      _hasNotifiedEmergencyContacts = true;
+      _isNotificationInProgress = true;
+      _lastNotificationAttempt = now;
     });
 
     // Add check for arrival status - if user has arrived, don't send notifications
@@ -584,7 +598,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
           duration: Duration(seconds: 3),
         ),
       );
-      _isNotificationInProgress = false; // Release the lock
+      setState(() {
+        _isNotificationInProgress = false; // Release the lock
+      });
       return;
     }
 
@@ -596,8 +612,8 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       setState(() {
         _hasNotifiedEmergencyContacts =
             true; // Mark as notified to prevent retries
+        _isNotificationInProgress = false; // Release the lock on timeout
       });
-      _isNotificationInProgress = false; // Release the lock on timeout
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -619,7 +635,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       if (currentUser == null) {
         print("❌ No user logged in - Cannot fetch contacts");
         timeoutTimer.cancel();
-        _isNotificationInProgress = false; // Release the lock
+        setState(() {
+          _isNotificationInProgress = false; // Release the lock
+        });
         throw Exception("No user logged in");
       }
 
@@ -712,7 +730,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     if (contacts.isEmpty) {
       print("❌ NO EMERGENCY CONTACTS FOUND - Cannot send notifications");
       timeoutTimer.cancel();
-      _isNotificationInProgress = false; // Release the lock
+      setState(() {
+        _isNotificationInProgress = false; // Release the lock
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -726,25 +746,8 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
     print("✅ Found ${contacts.length} emergency contacts");
 
-    // Another redundant check to make absolutely sure we don't send twice
-    if (_hasNotifiedEmergencyContacts) {
-      print(
-        "ℹ️ Emergency contacts already notified during contact fetching - skipping",
-      );
-      timeoutTimer.cancel();
-      _isNotificationInProgress = false; // Release the lock
-      return;
-    }
-
-    // Double-check arrival status again in case it changed during contact fetching
-    if (_hasArrivedAtDestination) {
-      print(
-        "✅ User has arrived during contact fetching - skipping notifications",
-      );
-      timeoutTimer.cancel();
-      _isNotificationInProgress = false; // Release the lock
-      return;
-    }
+    // Reset this flag to false to ensure we can check arrival status properly during message sending
+    bool arrivedDuringProcess = false;
 
     try {
       // Default values
@@ -846,17 +849,22 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
       // Check if the operation has timed out
       if (isTimeoutOccurred) {
-        _isNotificationInProgress = false; // Release the lock
+        setState(() {
+          _isNotificationInProgress = false; // Release the lock
+        });
         return;
       }
 
-      // Final arrival check before sending any messages
-      if (_hasArrivedAtDestination) {
+      // Check arrival status again - it may have changed during data fetch
+      arrivedDuringProcess = _hasArrivedAtDestination;
+      if (arrivedDuringProcess) {
         print(
           "✅ User has arrived at destination during SMS preparation - canceling notification",
         );
         timeoutTimer.cancel();
-        _isNotificationInProgress = false; // Release the lock
+        setState(() {
+          _isNotificationInProgress = false; // Release the lock
+        });
         return;
       }
 
@@ -881,12 +889,15 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       for (final contact in contacts) {
         // Check for timeout before sending each message
         if (isTimeoutOccurred) {
-          _isNotificationInProgress = false; // Release the lock
+          setState(() {
+            _isNotificationInProgress = false; // Release the lock
+          });
           return;
         }
 
-        // Check arrival status before each message send
+        // We need to check if the user has arrived during our processing
         if (_hasArrivedAtDestination) {
+          arrivedDuringProcess = true;
           print(
             "✅ User has arrived during message sending process - stopping further messages",
           );
@@ -940,11 +951,21 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
       print("✅ EMERGENCY NOTIFICATION PROCESS COMPLETED");
 
-      if (atLeastOneMessageSent) {
+      if (arrivedDuringProcess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'You arrived at your destination during notification process',
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      } else if (atLeastOneMessageSent) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Emergency contacts have been notified'),
-            backgroundColor: Colors.green,
+            backgroundColor: Colors.orange,
             duration: Duration(seconds: 5),
           ),
         );
@@ -974,7 +995,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       );
     } finally {
       // Always release the lock, regardless of success/failure
-      _isNotificationInProgress = false;
+      setState(() {
+        _isNotificationInProgress = false;
+      });
     }
   }
 
@@ -1001,10 +1024,10 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     // Check if it's a Philippine number and format correctly
     if (phone.startsWith("0")) {
       // Convert 09XXXXXXXXX to 639XXXXXXXXX (without + symbol)
-      phone = "63" + phone.substring(1);
+      phone = "63${phone.substring(1)}";
     } else if (phone.startsWith("9") && phone.length == 10) {
       // Convert 9XXXXXXXXX to 639XXXXXXXXX
-      phone = "63" + phone;
+      phone = "63$phone";
     } else if (phone.startsWith("+63")) {
       // Remove the + symbol
       phone = phone.substring(1);
@@ -1012,15 +1035,15 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       // Already in correct format
     } else if (phone.length == 11 && phone.startsWith("0")) {
       // Convert 09XXXXXXXXX to 639XXXXXXXXX
-      phone = "63" + phone.substring(1);
+      phone = "63${phone.substring(1)}";
     } else {
       // If it doesn't match any known pattern, try to make a best guess
       if (phone.length == 10) {
         // Assume it's a 10-digit number missing the country code
-        phone = "63" + phone;
+        phone = "63$phone";
       } else if (phone.length == 11 && !phone.startsWith("0")) {
         // Some other 11-digit format
-        phone = "63" + phone.substring(phone.length - 10);
+        phone = "63${phone.substring(phone.length - 10)}";
       }
     }
 
@@ -1334,7 +1357,6 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   Future<void> _zoomToShowBothLocations(LatLng from, LatLng to) async {
     try {
       final controller = await _mapController.future;
-      if (controller == null) return;
 
       LatLngBounds bounds = LatLngBounds(
         southwest: LatLng(
@@ -1561,8 +1583,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   Future<void> _fitBoundsWithMarkers() async {
     if (_routePoints.isEmpty ||
         _pickupCoords == null ||
-        _destinationCoords == null)
+        _destinationCoords == null) {
       return;
+    }
 
     try {
       LatLngBounds bounds = LatLngBounds(
@@ -1600,9 +1623,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       );
 
       final controller = await _mapController.future;
-      if (controller != null) {
-        controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
-      }
+      controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
     } catch (e) {
       print('Error fitting bounds with markers: $e');
     }
