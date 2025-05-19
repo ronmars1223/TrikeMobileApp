@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../home/user_homepage.dart';
 
 class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
   @override
   _LoginPageState createState() => _LoginPageState();
 }
@@ -112,7 +114,7 @@ class _LoginPageState extends State<LoginPage> {
       backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
-          child: Container(
+          child: SizedBox(
             height:
                 MediaQuery.of(context).size.height -
                 MediaQuery.of(context).padding.top,
@@ -136,12 +138,14 @@ class _LoginPageState extends State<LoginPage> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.directions_car_rounded,
-                          size: 100,
-                          color: Colors.white,
+                        // Replace the icon with the logo image - larger size
+                        Image.asset(
+                          'img/logo.png',
+                          width: 180,
+                          height: 180,
+                          fit: BoxFit.contain,
                         ),
-                        SizedBox(height: 20),
+                        SizedBox(height: 10), // Reduced spacing
                         Text(
                           'Welcome Back',
                           style: TextStyle(
@@ -150,7 +154,7 @@ class _LoginPageState extends State<LoginPage> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        SizedBox(height: 10),
+                        SizedBox(height: 5), // Reduced spacing
                         Text(
                           'Sign in to continue',
                           style: TextStyle(color: Colors.white70, fontSize: 18),
@@ -228,13 +232,6 @@ class _LoginPageState extends State<LoginPage> {
                           SizedBox(height: 30),
                           ElevatedButton(
                             onPressed: _login,
-                            child: Text(
-                              'Login',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
                             style: ElevatedButton.styleFrom(
                               foregroundColor: Colors.white,
                               backgroundColor: Colors.blue.shade800,
@@ -243,6 +240,13 @@ class _LoginPageState extends State<LoginPage> {
                                 borderRadius: BorderRadius.circular(15),
                               ),
                               elevation: 5,
+                            ),
+                            child: Text(
+                              'Login',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                           SizedBox(height: 20),
