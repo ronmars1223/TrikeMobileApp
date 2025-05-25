@@ -13,9 +13,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform, // Use correct options
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Initialize Google Maps with Hybrid Composition
   final GoogleMapsFlutterPlatform mapsImplementation =
@@ -28,6 +26,8 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -37,7 +37,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: AuthChecker(), // Auth state checker
+      home: AuthChecker(),
       routes: {
         '/login': (context) => LoginPage(),
         '/home': (context) => HomePage(),
@@ -47,12 +47,16 @@ class MyApp extends StatelessWidget {
 }
 
 class AuthChecker extends StatelessWidget {
-  final DatabaseReference _database =
-      FirebaseDatabase.instanceFor(
-        app: FirebaseDatabase.instance.app,
-        databaseURL:
-            "https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/",
-      ).ref();
+  const AuthChecker({super.key});
+
+  // Create a getter method to initialize DatabaseReference
+  DatabaseReference get _database {
+    return FirebaseDatabase.instanceFor(
+      app: Firebase.app(),
+      databaseURL:
+          "https://capstone-33ff5-default-rtdb.asia-southeast1.firebasedatabase.app/",
+    ).ref();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,17 +64,21 @@ class AuthChecker extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
+
         if (snapshot.hasData) {
           return FutureBuilder<DataSnapshot>(
             future: _database.child("users/${snapshot.data!.uid}").get(),
             builder: (context, userSnapshot) {
               if (userSnapshot.connectionState == ConnectionState.waiting) {
-                return Scaffold(
+                return const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
                 );
               }
+
               if (userSnapshot.hasData && userSnapshot.data!.value != null) {
                 var userData =
                     userSnapshot.data!.value as Map<dynamic, dynamic>;
@@ -96,8 +104,10 @@ class AuthChecker extends StatelessWidget {
     return Scaffold(
       body: Center(
         child: AlertDialog(
-          title: Text("Access Denied"),
-          content: Text("Admin access is not available on this platform."),
+          title: const Text("Access Denied"),
+          content: const Text(
+            "Admin access is not available on this platform.",
+          ),
           actions: [
             TextButton(
               onPressed:
@@ -105,7 +115,7 @@ class AuthChecker extends StatelessWidget {
                     context,
                     MaterialPageRoute(builder: (_) => LoginPage()),
                   ),
-              child: Text("OK"),
+              child: const Text("OK"),
             ),
           ],
         ),

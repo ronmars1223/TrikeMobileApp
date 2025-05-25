@@ -453,6 +453,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       _hasArrivedAtDestination = false;
     });
 
+    // Duration already includes the 5-minute buffer from _parseDurationText
     _estimatedArrivalTime = DateTime.now().add(duration);
     _updateCountdownText();
     _countdownTimer = Timer.periodic(
@@ -461,7 +462,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
     );
 
     print(
-      "⏱️ Started countdown timer: ${duration.inMinutes} minutes ${duration.inSeconds % 60} seconds",
+      "⏱️ Started countdown timer with 5-minute buffer: ${duration.inMinutes} minutes ${duration.inSeconds % 60} seconds",
     );
   }
 
@@ -1215,7 +1216,8 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       minutes = int.tryParse(minMatch.group(1) ?? '0') ?? 0;
     }
 
-    return Duration(hours: hours, minutes: minutes);
+    // Automatically add 5 minutes buffer to the duration
+    return Duration(hours: hours, minutes: minutes + 5);
   }
 
   void _resetCountdown() {
@@ -1227,9 +1229,39 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.blue.shade600,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'All times include a 5-minute safety buffer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 16),
               ListTile(
                 leading: Icon(Icons.refresh),
                 title: Text('Reset to original estimate'),
+                subtitle: Text('(includes 5-min buffer)'),
                 onTap: () {
                   Navigator.pop(context);
                   final duration = _parseDurationText(_routeDuration);
@@ -1239,7 +1271,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
               Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
               ListTile(
                 leading: Icon(Icons.add_circle_outline),
-                title: Text('Add 5 minutes'),
+                title: Text('Add 5 more minutes'),
                 onTap: () {
                   Navigator.pop(context);
                   if (_estimatedArrivalTime != null) {
@@ -1651,6 +1683,9 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
       );
 
       int estimatedMinutes = (_distance! * 60 / 40).round();
+      // Add 5 minutes buffer to basic route calculation too
+      estimatedMinutes += 5;
+
       _routeDuration =
           estimatedMinutes < 60
               ? "$estimatedMinutes mins"

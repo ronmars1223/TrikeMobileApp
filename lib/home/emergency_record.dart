@@ -198,7 +198,7 @@ class AudioRecorderHelper {
           final timeStr =
               "${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}-${now.second.toString().padLeft(2, '0')}";
 
-          final filename = customFilename ?? 'recording_${dateStr}_${timeStr}';
+          final filename = customFilename ?? 'recording_${dateStr}_$timeStr';
           final recordingPath =
               '${_recordingsDirectory!.path}/$filename$extension';
 
