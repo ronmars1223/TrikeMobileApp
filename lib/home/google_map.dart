@@ -65,7 +65,7 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
   final TransportMode _selectedTransportMode = TransportMode.car;
   bool _hasNotifiedEmergencyContacts = false;
   bool _hasArrivedAtDestination = false;
-  final double _arrivalThresholdDistance = 0.5;
+  final double _arrivalThresholdDistance = 0.05;
   bool _isNotificationInProgress = false;
   DateTime? _lastNotificationAttempt;
 
@@ -127,7 +127,6 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
 
   Future<void> _startLocationTracking() async {
     try {
-      // First check for permissions as in the original code
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -137,135 +136,234 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
         }
       }
 
-      // Get the current user from Firebase Auth
-      User? currentUser = FirebaseAuth.instance.currentUser;
+      final User? currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) {
         print('No user logged in, cannot access location');
         return;
       }
 
-      // Reference to the database location
-      final DatabaseReference databaseRef = FirebaseDatabase.instance.ref();
+      final databaseRef = FirebaseDatabase.instance.ref();
       final String userId = currentUser.uid;
 
-      // Set up a listener for the user's location in Firebase
-      databaseRef.child('users/$userId/current_location').onValue.listen((
-        event,
-      ) {
-        if (!mounted) return;
+      // METHOD 1: Direct device GPS tracking (PRIMARY - for real-time updates)
+      print("🛰️ Starting direct GPS tracking...");
+      const LocationSettings locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5, // Update every 5 meters movement
+      );
 
-        final data = event.snapshot.value as Map<dynamic, dynamic>?;
-        if (data != null) {
+      _locationSubscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        (Position position) {
+          if (!mounted) return;
+
+          print(
+            "🛰️ Direct GPS Update: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}",
+          );
+          print("📡 GPS Accuracy: ${position.accuracy.toStringAsFixed(1)}m");
+
           setState(() {
-            // Create a Position object from the Firebase data with all required parameters
-            _currentPosition = Position(
-              latitude: data['latitude'] ?? 0.0,
-              longitude: data['longitude'] ?? 0.0,
-              timestamp: DateTime.fromMillisecondsSinceEpoch(
-                (data['timestamp'] as int?) ?? 0,
-              ),
-              accuracy: data['accuracy'] ?? 0.0,
-              altitude: 0.0,
-              heading: 0.0,
-              speed: data['speed'] ?? 0.0,
-              speedAccuracy: 0.0,
-              altitudeAccuracy: 0.0,
-              headingAccuracy: 0.0,
-              floor: null,
-              isMocked: false,
-            );
+            _currentPosition = position;
+            _pickupCoords = LatLng(position.latitude, position.longitude);
 
-            // Update pickup coordinates if needed
-            if (_pickup == null || _pickup!.contains("Current Location")) {
-              _pickupCoords = LatLng(
-                _currentPosition!.latitude,
-                _currentPosition!.longitude,
-              );
-              if (_destinationCoords != null) {
-                _distance = _calculateDistance(
-                  _pickupCoords!,
-                  _destinationCoords!,
-                );
-              }
-            }
-
-            // Check if user has arrived at destination
-            if (_destinationCoords != null && !_hasArrivedAtDestination) {
-              double distanceToDestination = _calculateDistance(
-                LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+            // Calculate distance if destination is set
+            if (_destinationCoords != null) {
+              final oldDistance = _distance;
+              _distance = _calculateDistance(
+                _pickupCoords!,
                 _destinationCoords!,
               );
 
-              // If within threshold distance (50 meters = 0.05 km), mark as arrived
-              if (distanceToDestination <= _arrivalThresholdDistance) {
-                _hasArrivedAtDestination = true;
-                _countdownTimer?.cancel();
-                _countdownText = "Arrived";
+              if (oldDistance != null) {
+                print(
+                  "📏 GPS Distance changed: ${(oldDistance * 1000).toStringAsFixed(1)}m → ${(_distance! * 1000).toStringAsFixed(1)}m",
+                );
+              } else {
+                print(
+                  "📏 GPS Initial distance: ${(_distance! * 1000).toStringAsFixed(1)}m",
+                );
+              }
+              print(
+                "🎯 Current distance to destination: ${(_distance! * 1000).toStringAsFixed(0)}m",
+              );
+            }
 
-                // Add this to ensure emergency notifications are disabled
-                _hasNotifiedEmergencyContacts =
-                    true; // Mark as notified to prevent any SMS sending
+            // Check if arrived using direct GPS
+            if (_destinationCoords != null && !_hasArrivedAtDestination) {
+              final distanceToDestination = _calculateDistance(
+                _pickupCoords!,
+                _destinationCoords!,
+              );
 
-                // Show arrived notification
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('You have arrived at your destination!'),
-                    backgroundColor: Colors.green,
-                    duration: Duration(seconds: 5),
-                  ),
+              print(
+                "🔍 GPS Distance check: ${(distanceToDestination * 1000).toStringAsFixed(0)}m (threshold: 50m)",
+              );
+
+              if (distanceToDestination <= 0.05) {
+                // 50 meters
+                print(
+                  "✅ ARRIVAL DETECTED via GPS! User has reached destination",
                 );
 
-                // Auto-reload route information
+                setState(() {
+                  _hasArrivedAtDestination = true;
+                  _countdownText = "Arrived";
+                });
+
+                _countdownTimer?.cancel();
+                _hasNotifiedEmergencyContacts = true;
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('You have arrived at your destination!'),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 5),
+                    ),
+                  );
+                }
+
                 _reloadRouteOnArrival();
+              } else {
+                final remainingDistance = (distanceToDestination * 1000) - 50;
+                print(
+                  "🚶 GPS: Still ${remainingDistance.toStringAsFixed(0)}m away from arrival threshold",
+                );
               }
             }
           });
 
-          // Move the map to follow user if needed
           if (_isFollowingUser) {
             _animateToCurrentLocation(zoom: 17.0);
           }
-        }
-      });
 
-      // Get the initial position
-      final snapshot =
-          await databaseRef.child('users/$userId/current_location').get();
-      if (snapshot.exists) {
-        final data = snapshot.value as Map<dynamic, dynamic>;
+          // Optional: Upload to Firebase for other users/features
+          _uploadLocationToFirebase(position, userId, databaseRef);
+        },
+        onError: (error) {
+          print("❌ GPS Stream Error: $error");
+          // Fallback to Firebase method if GPS fails
+          _startFirebaseLocationTracking(databaseRef, userId);
+        },
+      );
 
-        _currentPosition = Position(
-          latitude: data['latitude'] ?? 0.0,
-          longitude: data['longitude'] ?? 0.0,
-          timestamp: DateTime.fromMillisecondsSinceEpoch(
-            (data['timestamp'] as int?) ?? 0,
-          ),
-          accuracy: data['accuracy'] ?? 0.0,
-          altitude: 0.0,
-          heading: 0.0,
-          speed: data['speed'] ?? 0.0,
-          speedAccuracy: 0.0,
-          altitudeAccuracy: 0.0, // Added missing parameter
-          headingAccuracy: 0.0, // Added missing parameter
-          floor: null, // Added missing parameter
-          isMocked: false, // Added missing parameter
+      // METHOD 2: Firebase listener (BACKUP - for when GPS fails or for other users)
+      _startFirebaseLocationTracking(databaseRef, userId);
+
+      // Get initial position immediately
+      print("📍 Getting initial GPS position...");
+      try {
+        Position initialPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+
+        print(
+          "📍 Initial GPS position: ${initialPosition.latitude.toStringAsFixed(6)}, ${initialPosition.longitude.toStringAsFixed(6)}",
         );
 
         if (mounted) {
           setState(() {
+            _currentPosition = initialPosition;
             _pickupCoords = LatLng(
-              _currentPosition!.latitude,
-              _currentPosition!.longitude,
+              initialPosition.latitude,
+              initialPosition.longitude,
             );
+
+            if (_destinationCoords != null) {
+              _distance = _calculateDistance(
+                _pickupCoords!,
+                _destinationCoords!,
+              );
+              print(
+                "🏁 Initial GPS distance to destination: ${(_distance! * 1000).toStringAsFixed(0)}m",
+              );
+            }
           });
         }
+      } catch (e) {
+        print("⚠️ Could not get initial GPS position: $e");
       }
-
-      // We don't need the locationSubscription from the original code
-      // since we're using Firebase as our location source
-      _locationSubscription = null;
     } catch (e) {
-      print('Error starting location tracking: $e');
+      print('❌ Error starting location tracking: $e');
+    }
+  }
+
+  // Separate method for Firebase tracking (backup)
+  void _startFirebaseLocationTracking(
+    DatabaseReference databaseRef,
+    String userId,
+  ) {
+    print("🔥 Starting Firebase location tracking as backup...");
+
+    databaseRef.child('users/$userId/current_location').onValue.listen((event) {
+      if (!mounted) return;
+
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data != null) {
+        print("🔥 Firebase location update received");
+
+        // Only use Firebase data if we don't have recent GPS data
+        if (_currentPosition == null ||
+            DateTime.now().difference(_currentPosition!.timestamp).inMinutes >
+                2) {
+          print("🔥 Using Firebase location (GPS unavailable)");
+
+          final position = Position(
+            latitude: data['latitude'] ?? 0.0,
+            longitude: data['longitude'] ?? 0.0,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              (data['timestamp'] as int?) ?? 0,
+            ),
+            accuracy: data['accuracy'] ?? 0.0,
+            altitude: 0.0,
+            heading: 0.0,
+            speed: data['speed'] ?? 0.0,
+            speedAccuracy: 0.0,
+            altitudeAccuracy: 0.0,
+            headingAccuracy: 0.0,
+            floor: null,
+            isMocked: false,
+          );
+
+          setState(() {
+            _currentPosition = position;
+            _pickupCoords = LatLng(position.latitude, position.longitude);
+
+            if (_destinationCoords != null) {
+              _distance = _calculateDistance(
+                _pickupCoords!,
+                _destinationCoords!,
+              );
+              print(
+                "🔥 Firebase distance: ${(_distance! * 1000).toStringAsFixed(0)}m",
+              );
+            }
+          });
+        } else {
+          print("🔥 Ignoring Firebase update (GPS is more recent)");
+        }
+      }
+    });
+  }
+
+  // Helper method to upload GPS location to Firebase
+  Future<void> _uploadLocationToFirebase(
+    Position position,
+    String userId,
+    DatabaseReference databaseRef,
+  ) async {
+    try {
+      await databaseRef.child('users/$userId/current_location').set({
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'timestamp': position.timestamp.millisecondsSinceEpoch,
+        'accuracy': position.accuracy,
+        'speed': position.speed,
+      });
+      print("📤 Uploaded GPS location to Firebase");
+    } catch (e) {
+      print("⚠️ Failed to upload location to Firebase: $e");
     }
   }
 
@@ -2245,40 +2343,79 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                     Column(
                                       children: [
                                         Icon(
-                                          Icons.route,
-                                          color: Colors.blue.shade700,
+                                          _distance != null &&
+                                                  _distance! <=
+                                                      0.05 // Changed back to 0.05 (50m)
+                                              ? Icons.check_circle
+                                              : Icons.route,
+                                          color:
+                                              _distance != null &&
+                                                      _distance! <= 0.05
+                                                  ? Colors.green.shade700
+                                                  : Colors.blue.shade700,
                                           size: 18,
                                         ),
                                         SizedBox(height: 4),
                                         Text(
-                                          _distance != null
-                                              ? _formatDistance(_distance!)
-                                              : 'Calculating...',
+                                          _distance != null &&
+                                                  _distance! <=
+                                                      0.05 // Changed back to 0.05 (50m)
+                                              ? "Arrived"
+                                              : (_distance != null
+                                                  ? _formatDistance(_distance!)
+                                                  : 'Calculating...'),
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 16,
+                                            color:
+                                                _distance != null &&
+                                                        _distance! <= 0.05
+                                                    ? Colors.green.shade700
+                                                    : Colors.black,
                                           ),
                                         ),
                                         Text(
-                                          'Distance',
+                                          _distance != null &&
+                                                  _distance! <=
+                                                      0.05 // Changed back to 0.05 (50m)
+                                              ? 'Status'
+                                              : 'Distance',
                                           style: TextStyle(
                                             color: Colors.grey.shade700,
                                             fontSize: 12,
                                           ),
                                         ),
+                                        // Debug info showing actual distance
+                                        if (_distance != null &&
+                                            _distance! <= 0.05)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 2,
+                                            ),
+                                            child: Text(
+                                              '(${_formatDistance(_distance!)})',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade500,
+                                                fontSize: 10,
+                                              ),
+                                            ),
+                                          ),
                                       ],
                                     ),
+                                    // Duration with countdown or Arrived status
                                     // Duration with countdown or Arrived status
                                     Column(
                                       children: [
                                         Icon(
                                           _distance != null &&
-                                                  _distance! <= 0.05
+                                                  _distance! <=
+                                                      0.05 // Fixed: consistent 50m threshold
                                               ? Icons.check_circle
                                               : Icons.access_time,
                                           color:
                                               _distance != null &&
-                                                      _distance! <= 0.05
+                                                      _distance! <=
+                                                          0.05 // Fixed: consistent 50m threshold
                                                   ? Colors.green.shade700
                                                   : Colors.blue.shade700,
                                           size: 18,
@@ -2288,7 +2425,8 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                           children: [
                                             Text(
                                               _distance != null &&
-                                                      _distance! <= 0.05
+                                                      _distance! <=
+                                                          0.05 // Fixed: consistent 50m threshold
                                                   ? "Arrived" // Change the main text to "Arrived" instead of showing duration
                                                   : (_routeDuration.isNotEmpty
                                                       ? _routeDuration
@@ -2298,14 +2436,16 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                                 fontSize: 16,
                                                 color:
                                                     _distance != null &&
-                                                            _distance! <= 0.05
+                                                            _distance! <=
+                                                                0.05 // Fixed: consistent 50m threshold
                                                         ? Colors.green.shade700
                                                         : Colors.black,
                                               ),
                                             ),
-                                            // Only show countdown if NOT arrived
+                                            // Only show countdown if NOT arrived (Fixed: consistent 50m threshold)
                                             if (_distance == null ||
-                                                _distance! > 0.05)
+                                                _distance! >
+                                                    0.05) // Fixed: changed from 0.2 to 0.05
                                               if (_countdownText.isNotEmpty)
                                                 GestureDetector(
                                                   onTap: _resetCountdown,
@@ -2361,11 +2501,26 @@ class GoogleMapWidgetState extends State<GoogleMapWidget>
                                                     ),
                                                   ),
                                                 ),
+                                            // Debug distance display (you can remove this later)
+                                            if (_distance != null)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 4,
+                                                ),
+                                                child: Text(
+                                                  'Distance: ${(_distance! * 1000).toStringAsFixed(0)}m',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                ),
+                                              ),
                                           ],
                                         ),
                                         Text(
                                           _distance != null &&
-                                                  _distance! <= 0.05
+                                                  _distance! <=
+                                                      0.05 // Fixed: consistent 50m threshold
                                               ? 'Status'
                                               : 'Duration',
                                           style: TextStyle(

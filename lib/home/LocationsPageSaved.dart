@@ -7,6 +7,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:async';
 
 class LocationsPageSaved extends StatefulWidget {
+  const LocationsPageSaved({super.key});
+
   @override
   _LocationsPageSavedState createState() => _LocationsPageSavedState();
 }
@@ -179,19 +181,19 @@ class _LocationsPageSavedState extends State<LocationsPageSaved> {
                         ),
                         iconEnabledColor: primaryBlue,
                         items: [
-                          DropdownMenuItem(child: Text('Home'), value: 'home'),
-                          DropdownMenuItem(child: Text('Work'), value: 'work'),
+                          DropdownMenuItem(value: 'home', child: Text('Home')),
+                          DropdownMenuItem(value: 'work', child: Text('Work')),
                           DropdownMenuItem(
-                            child: Text('School'),
                             value: 'school',
+                            child: Text('School'),
                           ),
                           DropdownMenuItem(
-                            child: Text('Favorite'),
                             value: 'favorite',
+                            child: Text('Favorite'),
                           ),
                           DropdownMenuItem(
-                            child: Text('Other'),
                             value: 'other',
+                            child: Text('Other'),
                           ),
                         ],
                         onChanged: (value) {
@@ -214,7 +216,6 @@ class _LocationsPageSavedState extends State<LocationsPageSaved> {
                     },
                   ),
                   ElevatedButton(
-                    child: Text('Save Location'),
                     onPressed: () {
                       Navigator.of(context).pop();
                       _saveCurrentLocation(
@@ -235,6 +236,7 @@ class _LocationsPageSavedState extends State<LocationsPageSaved> {
                         vertical: 10,
                       ),
                     ),
+                    child: Text('Save Location'),
                   ),
                 ],
               );
@@ -686,19 +688,19 @@ class _LocationsPageSavedState extends State<LocationsPageSaved> {
                 Navigator.of(context).pop();
                 _deleteLocation(location['id']);
               },
-              child: Text(
-                'Delete',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white,
                 elevation: 2,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Delete',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
