@@ -48,6 +48,154 @@ class EmergencyDialog {
     }
   }
 
+  /// NEW FUNCTION: Save emergency alert to ride_history
+  static Future<void> _saveEmergencyAlertToRideHistory(
+    Position? position,
+    Map<String, String> userInfo,
+    Map<String, dynamic> smsResult,
+  ) async {
+    User? user = _auth.currentUser;
+
+    if (user != null) {
+      try {
+        final now = DateTime.now();
+        
+        // Generate a unique emergency alert ID
+        final emergencyId = '-${now.millisecondsSinceEpoch.toString()}${user.uid.substring(0, 6)}';
+
+        // Create reference to ride_history node
+        DatabaseReference rideHistoryRef = _database.ref(
+          'ride_history/$emergencyId',
+        );
+
+        // Create Google Maps URL if position is available
+        String? mapsUrl;
+        if (position != null) {
+          mapsUrl = "https://maps.google.com/maps?q=${position.latitude},${position.longitude}";
+        }
+
+        // Process contact numbers that were notified
+        List<Map<String, dynamic>> notifiedContacts = [];
+        List<Map<String, dynamic>> failedContacts = [];
+        
+        if (smsResult['messages'] != null && smsResult['messages'] is List) {
+          for (var message in smsResult['messages']) {
+            Map<String, dynamic> contactInfo = {
+              'name': message['name'] ?? 'Unknown',
+              'phone': message['phone'] ?? '',
+              'isAdmin': message['isAdmin'] ?? false,
+              'status': message['status'] ?? 'unknown',
+              'message': message['message'] ?? '',
+              'timestamp': now.millisecondsSinceEpoch,
+            };
+            
+            if (message['status'] == 'sent') {
+              notifiedContacts.add(contactInfo);
+            } else {
+              failedContacts.add(contactInfo);
+            }
+          }
+        }
+
+        // Create the emergency alert data for ride_history
+        Map<String, dynamic> emergencyAlertData = {
+          'uid': user.uid,
+          'type': 'emergency_alert', // Distinguish from regular rides
+          'status': 'completed', // Mark as completed since alert was sent
+          'timestamp': ServerValue.timestamp,
+          'datetime': "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+          
+          // User information
+          'user': {
+            'uid': user.uid,
+            'email': user.email,
+            'phone': user.phoneNumber,
+            'firstName': userInfo['firstName'] ?? '',
+            'lastName': userInfo['lastName'] ?? '',
+            'fullName': userInfo['fullName'] ?? '',
+          },
+          
+          // Location information (if available)
+          'location': position != null ? {
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'accuracy': position.accuracy,
+            'altitude': position.altitude,
+            'speed': position.speed,
+            'speedAccuracy': position.speedAccuracy,
+            'heading': position.heading,
+            'timestamp': position.timestamp?.millisecondsSinceEpoch,
+            'maps_url': mapsUrl,
+          } : null,
+          
+          // SMS alert results with detailed contact information
+          'sms_results': {
+            'success': smsResult['success'],
+            'sent_count': smsResult['sent'],
+            'total_contacts': smsResult['total'],
+            'messages': smsResult['messages'], // Keep original message details
+          },
+          
+          // NEW: Detailed contact tracking
+          'contacts_notified': {
+            'successful': notifiedContacts,
+            'failed': failedContacts,
+            'summary': {
+              'total_attempted': smsResult['total'] ?? 0,
+              'successfully_notified': notifiedContacts.length,
+              'failed_notifications': failedContacts.length,
+              'admin_contacts_notified': notifiedContacts.where((c) => c['isAdmin'] == true).length,
+              'personal_contacts_notified': notifiedContacts.where((c) => c['isAdmin'] == false).length,
+            }
+          },
+          
+          // Emergency-specific fields
+          'emergency_details': {
+            'alert_sent_at': ServerValue.timestamp,
+            'contacts_notified': smsResult['sent'],
+            'location_shared': position != null,
+            'recording_started': true, // Assuming recording is always started
+            'alert_method': 'enhanced_dialog', // Track which method was used
+          },
+          
+          // Additional metadata for consistency with ride_history structure
+          'created_at': ServerValue.timestamp,
+          'updated_at': ServerValue.timestamp,
+        };
+
+        // Save to ride_history
+        await rideHistoryRef.set(emergencyAlertData);
+
+        print('✅ Emergency alert logged to ride_history/$emergencyId');
+        print('✅ Contacts notified: ${notifiedContacts.length} successful, ${failedContacts.length} failed');
+        
+        // Also update user's recent activity if needed
+        DatabaseReference recentActivityRef = _database.ref(
+          'recent_activity/${user.uid}/$emergencyId',
+        );
+        
+        await recentActivityRef.set({
+          'type': 'emergency_alert',
+          'timestamp': ServerValue.timestamp,
+          'datetime': "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+          'status': 'completed',
+          'contacts_notified': smsResult['sent'],
+          'location_shared': position != null,
+          'successful_contacts': notifiedContacts.map((c) => {
+            'name': c['name'],
+            'phone': c['phone'],
+            'isAdmin': c['isAdmin'],
+          }).toList(),
+        });
+
+        print('✅ Emergency alert also logged to recent_activity with contact details');
+        
+      } catch (e) {
+        print('❌ Error saving emergency alert to ride_history: $e');
+      }
+    }
+  }
+
   static Future<void> _saveEmergencyLocationToFirebase(
     Position position,
     Map<String, String> userInfo,
@@ -195,6 +343,60 @@ class EmergencyDialog {
     }
 
     return true;
+  }
+
+  /// NEW FUNCTION: Get admin contact information for SMS message
+  static Future<String> _getAdminContactInfo() async {
+    try {
+      // Reference to admin_contacts in Firebase
+      DatabaseReference adminContactsRef = _database.ref("admin_contacts");
+      final snapshot = await adminContactsRef.get();
+
+      if (!snapshot.exists) {
+        return "";
+      }
+
+      List<String> adminNumbers = [];
+      Map<dynamic, dynamic>? contactsMap = snapshot.value as Map<dynamic, dynamic>?;
+
+      if (contactsMap != null) {
+        contactsMap.forEach((contactKey, contactValue) {
+          // Case 1: When contact is stored as a map
+          if (contactValue is Map<dynamic, dynamic>) {
+            if (contactValue.containsKey('phone')) {
+              String phone = contactValue['phone'] ?? '';
+              if (phone.isNotEmpty) {
+                adminNumbers.add(phone);
+              }
+            }
+          }
+          // Case 2: Direct key-value pairs
+          else if (contactKey is String && contactValue is String) {
+            // If the value appears to be a phone number
+            if (contactValue.startsWith('0') ||
+                contactValue.startsWith('+') ||
+                contactValue.startsWith('63')) {
+              adminNumbers.add(contactValue);
+            }
+          }
+        });
+      }
+
+      // Format the admin contact message
+      if (adminNumbers.isNotEmpty) {
+        if (adminNumbers.length == 1) {
+          return "For emergency assistance, please contact the Barangay at ${adminNumbers[0]}.";
+        } else {
+          String numbersList = adminNumbers.join(", ");
+          return "For emergency assistance, please contact the Barangay at: $numbersList.";
+        }
+      }
+
+      return "";
+    } catch (e) {
+      print("Error getting admin contact info: $e");
+      return "";
+    }
   }
 
   /// Fetch emergency contacts from Firebase - UPDATED to use UID structure
@@ -469,7 +671,7 @@ class EmergencyDialog {
     }
   }
 
-  /// Send SMS alerts to emergency contacts - IMPROVED with deduplication
+  /// Send SMS alerts to emergency contacts - IMPROVED with deduplication and admin contact info
   static Future<Map<String, dynamic>> _sendSmsAlerts(
     List<Map<String, dynamic>> contacts,
     Position? position,
@@ -533,8 +735,15 @@ class EmergencyDialog {
       locationText = "Location: $mapsUrl";
     }
 
-    // Create the message with the user's full name
+    // Get admin contact numbers for emergency message
+    String adminContactInfo = await _getAdminContactInfo();
+
+    // Create the message with the user's full name and admin contact info
     String message = "$fullName needs immediate help! $locationText";
+    if (adminContactInfo.isNotEmpty) {
+      message += " $adminContactInfo";
+    }
+    
     print("Message content: $message");
 
     // Process each unique contact individually
@@ -811,6 +1020,9 @@ class EmergencyDialog {
                     },
                   );
 
+                  // Get user info first
+                  final userInfo = await _getUserInfo();
+
                   // Get emergency contacts and admin contacts
                   final userContacts = await _fetchEmergencyContacts();
                   final adminContacts = await _fetchAdminContacts();
@@ -823,6 +1035,14 @@ class EmergencyDialog {
 
                   // Send SMS alerts to all contacts
                   final result = await _sendSmsAlerts(allContacts, position);
+
+                  // IMPORTANT: Save emergency location to Firebase first
+                  if (position != null) {
+                    await _saveEmergencyLocationToFirebase(position, userInfo);
+                  }
+
+                  // NEW: Save emergency alert to ride_history
+                  await _saveEmergencyAlertToRideHistory(position, userInfo, result);
 
                   // Close loading dialog
                   Navigator.of(context).pop();
@@ -1016,7 +1236,7 @@ class EmergencyDialog {
                               SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Emergency and admin contacts will be notified via SMS',
+                                  'Emergency and admin contacts will be notified via SMS with Barangay contact info',
                                   style: TextStyle(
                                     fontSize: 14,
                                     color: Colors.red.shade800,
@@ -1092,7 +1312,7 @@ class EmergencyDialog {
                                   ),
                                 ),
 
-                                // In the EmergencyDialog class, update the onPressed method
+                                // Enhanced onPressed method with ride_history logging
                                 onPressed: () async {
                                   setState(() {
                                     isLoading = true;
@@ -1160,6 +1380,13 @@ class EmergencyDialog {
                                       position,
                                     );
 
+                                    // NEW: Save emergency alert to ride_history
+                                    await _saveEmergencyAlertToRideHistory(
+                                      position,
+                                      userInfo,
+                                      result,
+                                    );
+
                                     alertSent = result['success'];
                                     if (alertSent) {
                                       _lastAlertTime = DateTime.now();
@@ -1197,7 +1424,7 @@ class EmergencyDialog {
                                                     ),
                                                   ),
                                                   Text(
-                                                    '${result['sent']} of ${result['total']} contacts notified',
+                                                    '${result['sent']} of ${result['total']} contacts notified with Barangay info',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                     ),
@@ -1207,6 +1434,13 @@ class EmergencyDialog {
                                                     position != null
                                                         ? 'Your location was shared with emergency services'
                                                         : 'Unable to share your location',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                  // NEW: Confirm ride_history logging
+                                                  Text(
+                                                    'Emergency alert logged to history',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                     ),
