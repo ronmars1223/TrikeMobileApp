@@ -35,6 +35,28 @@ class EmergencyDialog {
   static bool _isAlertInProgress = false;
   static const int _cooldownPeriodSeconds = 120; // 2-minute cooldown
 
+  // NEW: Store scanned driver information for emergency alerts
+  static Map<String, dynamic>? _scannedDriverInfo;
+
+  /// NEW FUNCTION: Set scanned driver information
+  static void setScannedDriverInfo(Map<String, dynamic>? driverInfo) {
+    _scannedDriverInfo = driverInfo;
+    print(
+      "✅ Driver info set for emergency alerts: ${driverInfo?['firstName']} ${driverInfo?['lastName']}",
+    );
+  }
+
+  /// NEW FUNCTION: Clear scanned driver information
+  static void clearScannedDriverInfo() {
+    _scannedDriverInfo = null;
+    print("✅ Driver info cleared from emergency alerts");
+  }
+
+  /// NEW FUNCTION: Get current scanned driver information
+  static Map<String, dynamic>? getScannedDriverInfo() {
+    return _scannedDriverInfo;
+  }
+
   /// Save alert timestamp to shared preferences for persistence
   static Future<void> _saveAlertTimestamp() async {
     try {
@@ -59,9 +81,10 @@ class EmergencyDialog {
     if (user != null) {
       try {
         final now = DateTime.now();
-        
+
         // Generate a unique emergency alert ID
-        final emergencyId = '-${now.millisecondsSinceEpoch.toString()}${user.uid.substring(0, 6)}';
+        final emergencyId =
+            '-${now.millisecondsSinceEpoch.toString()}${user.uid.substring(0, 6)}';
 
         // Create reference to ride_history node
         DatabaseReference rideHistoryRef = _database.ref(
@@ -71,13 +94,14 @@ class EmergencyDialog {
         // Create Google Maps URL if position is available
         String? mapsUrl;
         if (position != null) {
-          mapsUrl = "https://maps.google.com/maps?q=${position.latitude},${position.longitude}";
+          mapsUrl =
+              "https://maps.google.com/maps?q=${position.latitude},${position.longitude}";
         }
 
         // Process contact numbers that were notified
         List<Map<String, dynamic>> notifiedContacts = [];
         List<Map<String, dynamic>> failedContacts = [];
-        
+
         if (smsResult['messages'] != null && smsResult['messages'] is List) {
           for (var message in smsResult['messages']) {
             Map<String, dynamic> contactInfo = {
@@ -88,7 +112,7 @@ class EmergencyDialog {
               'message': message['message'] ?? '',
               'timestamp': now.millisecondsSinceEpoch,
             };
-            
+
             if (message['status'] == 'sent') {
               notifiedContacts.add(contactInfo);
             } else {
@@ -103,8 +127,9 @@ class EmergencyDialog {
           'type': 'emergency_alert', // Distinguish from regular rides
           'status': 'completed', // Mark as completed since alert was sent
           'timestamp': ServerValue.timestamp,
-          'datetime': "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
-          
+          'datetime':
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+
           // User information
           'user': {
             'uid': user.uid,
@@ -114,20 +139,23 @@ class EmergencyDialog {
             'lastName': userInfo['lastName'] ?? '',
             'fullName': userInfo['fullName'] ?? '',
           },
-          
+
           // Location information (if available)
-          'location': position != null ? {
-            'latitude': position.latitude,
-            'longitude': position.longitude,
-            'accuracy': position.accuracy,
-            'altitude': position.altitude,
-            'speed': position.speed,
-            'speedAccuracy': position.speedAccuracy,
-            'heading': position.heading,
-            'timestamp': position.timestamp?.millisecondsSinceEpoch,
-            'maps_url': mapsUrl,
-          } : null,
-          
+          'location':
+              position != null
+                  ? {
+                    'latitude': position.latitude,
+                    'longitude': position.longitude,
+                    'accuracy': position.accuracy,
+                    'altitude': position.altitude,
+                    'speed': position.speed,
+                    'speedAccuracy': position.speedAccuracy,
+                    'heading': position.heading,
+                    'timestamp': position.timestamp?.millisecondsSinceEpoch,
+                    'maps_url': mapsUrl,
+                  }
+                  : null,
+
           // SMS alert results with detailed contact information
           'sms_results': {
             'success': smsResult['success'],
@@ -135,7 +163,7 @@ class EmergencyDialog {
             'total_contacts': smsResult['total'],
             'messages': smsResult['messages'], // Keep original message details
           },
-          
+
           // NEW: Detailed contact tracking
           'contacts_notified': {
             'successful': notifiedContacts,
@@ -144,12 +172,22 @@ class EmergencyDialog {
               'total_attempted': smsResult['total'] ?? 0,
               'successfully_notified': notifiedContacts.length,
               'failed_notifications': failedContacts.length,
-              'admin_contacts_notified': notifiedContacts.where((c) => c['isAdmin'] == true).length,
-              'personal_contacts_notified': notifiedContacts.where((c) => c['isAdmin'] == false).length,
-            }
+              'admin_contacts_notified':
+                  notifiedContacts.where((c) => c['isAdmin'] == true).length,
+              'personal_contacts_notified':
+                  notifiedContacts.where((c) => c['isAdmin'] == false).length,
+            },
           },
-          
-          // Emergency-specific fields
+
+          // NEW: Include scanned driver information if available
+          'scanned_driver':
+              _scannedDriverInfo != null
+                  ? {
+                    'driver_info': _scannedDriverInfo,
+                    'scanned_at': now.millisecondsSinceEpoch,
+                    'included_in_alert': true,
+                  }
+                  : null,
           'emergency_details': {
             'alert_sent_at': ServerValue.timestamp,
             'contacts_notified': smsResult['sent'],
@@ -157,7 +195,7 @@ class EmergencyDialog {
             'recording_started': true, // Assuming recording is always started
             'alert_method': 'enhanced_dialog', // Track which method was used
           },
-          
+
           // Additional metadata for consistency with ride_history structure
           'created_at': ServerValue.timestamp,
           'updated_at': ServerValue.timestamp,
@@ -167,29 +205,38 @@ class EmergencyDialog {
         await rideHistoryRef.set(emergencyAlertData);
 
         print('✅ Emergency alert logged to ride_history/$emergencyId');
-        print('✅ Contacts notified: ${notifiedContacts.length} successful, ${failedContacts.length} failed');
-        
+        print(
+          '✅ Contacts notified: ${notifiedContacts.length} successful, ${failedContacts.length} failed',
+        );
+
         // Also update user's recent activity if needed
         DatabaseReference recentActivityRef = _database.ref(
           'recent_activity/${user.uid}/$emergencyId',
         );
-        
+
         await recentActivityRef.set({
           'type': 'emergency_alert',
           'timestamp': ServerValue.timestamp,
-          'datetime': "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
+          'datetime':
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}",
           'status': 'completed',
           'contacts_notified': smsResult['sent'],
           'location_shared': position != null,
-          'successful_contacts': notifiedContacts.map((c) => {
-            'name': c['name'],
-            'phone': c['phone'],
-            'isAdmin': c['isAdmin'],
-          }).toList(),
+          'successful_contacts':
+              notifiedContacts
+                  .map(
+                    (c) => {
+                      'name': c['name'],
+                      'phone': c['phone'],
+                      'isAdmin': c['isAdmin'],
+                    },
+                  )
+                  .toList(),
         });
 
-        print('✅ Emergency alert also logged to recent_activity with contact details');
-        
+        print(
+          '✅ Emergency alert also logged to recent_activity with contact details',
+        );
       } catch (e) {
         print('❌ Error saving emergency alert to ride_history: $e');
       }
@@ -357,7 +404,8 @@ class EmergencyDialog {
       }
 
       List<String> adminNumbers = [];
-      Map<dynamic, dynamic>? contactsMap = snapshot.value as Map<dynamic, dynamic>?;
+      Map<dynamic, dynamic>? contactsMap =
+          snapshot.value as Map<dynamic, dynamic>?;
 
       if (contactsMap != null) {
         contactsMap.forEach((contactKey, contactValue) {
@@ -671,7 +719,7 @@ class EmergencyDialog {
     }
   }
 
-  /// Send SMS alerts to emergency contacts - IMPROVED with deduplication and admin contact info
+  /// Send SMS alerts to emergency contacts - IMPROVED with deduplication, admin contact info, and driver details
   static Future<Map<String, dynamic>> _sendSmsAlerts(
     List<Map<String, dynamic>> contacts,
     Position? position,
@@ -738,12 +786,55 @@ class EmergencyDialog {
     // Get admin contact numbers for emergency message
     String adminContactInfo = await _getAdminContactInfo();
 
-    // Create the message with the user's full name and admin contact info
+    // NEW: Include driver information if available
+    String driverInfo = '';
+    if (_scannedDriverInfo != null) {
+      String driverName = '';
+      String licenseCode = '';
+      String tricycleId = '';
+
+      // Extract driver details
+      if (_scannedDriverInfo!['firstName'] != null ||
+          _scannedDriverInfo!['lastName'] != null) {
+        driverName =
+            '${_scannedDriverInfo!['firstName'] ?? ''} ${_scannedDriverInfo!['lastName'] ?? ''}'
+                .trim();
+      }
+
+      if (_scannedDriverInfo!['licenseCode'] != null) {
+        licenseCode = _scannedDriverInfo!['licenseCode'].toString();
+      }
+
+      if (_scannedDriverInfo!['tricycleId'] != null) {
+        tricycleId = _scannedDriverInfo!['tricycleId'].toString();
+      }
+
+      // Build driver info string
+      List<String> driverDetails = [];
+      if (driverName.isNotEmpty) {
+        driverDetails.add("Driver: $driverName");
+      }
+      if (licenseCode.isNotEmpty) {
+        driverDetails.add("License: $licenseCode");
+      }
+      if (tricycleId.isNotEmpty) {
+        driverDetails.add("Tricycle ID: $tricycleId");
+      }
+
+      if (driverDetails.isNotEmpty) {
+        driverInfo = " ${driverDetails.join(", ")}.";
+      }
+    }
+
+    // Create the message with the user's full name, driver info, and admin contact info
     String message = "$fullName needs immediate help! $locationText";
+    if (driverInfo.isNotEmpty) {
+      message += driverInfo;
+    }
     if (adminContactInfo.isNotEmpty) {
       message += " $adminContactInfo";
     }
-    
+
     print("Message content: $message");
 
     // Process each unique contact individually
@@ -1042,7 +1133,11 @@ class EmergencyDialog {
                   }
 
                   // NEW: Save emergency alert to ride_history
-                  await _saveEmergencyAlertToRideHistory(position, userInfo, result);
+                  await _saveEmergencyAlertToRideHistory(
+                    position,
+                    userInfo,
+                    result,
+                  );
 
                   // Close loading dialog
                   Navigator.of(context).pop();
@@ -1424,7 +1519,7 @@ class EmergencyDialog {
                                                     ),
                                                   ),
                                                   Text(
-                                                    '${result['sent']} of ${result['total']} contacts notified with Barangay info',
+                                                    '${result['sent']} of ${result['total']} contacts notified with driver and Barangay info',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                     ),

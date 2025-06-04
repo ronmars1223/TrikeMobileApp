@@ -9,6 +9,8 @@ import 'dart:async';
 import 'package:crypto/crypto.dart';
 import 'dart:math';
 
+import 'package:trike/home/emergency_page.dart';
+
 class QRScannerPage extends StatefulWidget {
   final Function(Map<String, dynamic>) onDriverScanned;
 
@@ -57,16 +59,16 @@ class _QRScannerPageState extends State<QRScannerPage> {
     try {
       final combined = base64Decode(encryptedData);
       if (combined.length < 8) return encryptedData;
-      
+
       // Remove salt (first 8 bytes)
       final encrypted = combined.sublist(8);
       final key = utf8.encode(_encryptionKey);
       final decrypted = <int>[];
-      
+
       for (int i = 0; i < encrypted.length; i++) {
         decrypted.add(encrypted[i] ^ key[i % key.length]);
       }
-      
+
       return utf8.decode(decrypted);
     } catch (e) {
       print('Decryption error: $e');
@@ -80,10 +82,14 @@ class _QRScannerPageState extends State<QRScannerPage> {
   }
 
   // Safely decrypt field if encrypted
-  String _getDecryptedField(Map<dynamic, dynamic> data, String fieldName, String defaultValue) {
+  String _getDecryptedField(
+    Map<dynamic, dynamic> data,
+    String fieldName,
+    String defaultValue,
+  ) {
     final fieldValue = data[fieldName];
     if (fieldValue == null) return defaultValue;
-    
+
     if (_isEncrypted(data)) {
       return _decryptData(fieldValue.toString());
     }
@@ -93,60 +99,89 @@ class _QRScannerPageState extends State<QRScannerPage> {
   // Decrypt driver data
   Map<String, dynamic> _decryptDriverData(Map<String, dynamic> driverData) {
     Map<String, dynamic> decryptedData = Map<String, dynamic>.from(driverData);
-    
+
     if (_isEncrypted(driverData)) {
       // Decrypt sensitive fields
-      decryptedData['firstName'] = _getDecryptedField(driverData, 'firstName', 'Unknown');
-      decryptedData['lastName'] = _getDecryptedField(driverData, 'lastName', 'Unknown');
-      decryptedData['licenseCode'] = _getDecryptedField(driverData, 'licenseCode', 'N/A');
-      
+      decryptedData['firstName'] = _getDecryptedField(
+        driverData,
+        'firstName',
+        'Unknown',
+      );
+      decryptedData['lastName'] = _getDecryptedField(
+        driverData,
+        'lastName',
+        'Unknown',
+      );
+      decryptedData['licenseCode'] = _getDecryptedField(
+        driverData,
+        'licenseCode',
+        'N/A',
+      );
+
       // Add decryption metadata
       decryptedData['_wasEncrypted'] = true;
-      decryptedData['_encryptionVersion'] = driverData['encryptionVersion'] ?? 'N/A';
+      decryptedData['_encryptionVersion'] =
+          driverData['encryptionVersion'] ?? 'N/A';
     } else {
       decryptedData['_wasEncrypted'] = false;
     }
-    
+
     return decryptedData;
   }
 
   // Decrypt tricycle data
   Map<String, dynamic> _decryptTricycleData(Map<String, dynamic> tricycleData) {
-    Map<String, dynamic> decryptedData = Map<String, dynamic>.from(tricycleData);
-    
+    Map<String, dynamic> decryptedData = Map<String, dynamic>.from(
+      tricycleData,
+    );
+
     if (_isEncrypted(tricycleData)) {
       // Decrypt sensitive fields
-      decryptedData['plateNumber'] = _getDecryptedField(tricycleData, 'plateNumber', 'Unknown');
+      decryptedData['plateNumber'] = _getDecryptedField(
+        tricycleData,
+        'plateNumber',
+        'Unknown',
+      );
       decryptedData['orCr'] = _getDecryptedField(tricycleData, 'orCr', 'N/A');
-      
+
       // Add decryption metadata
       decryptedData['_wasEncrypted'] = true;
-      decryptedData['_encryptionVersion'] = tricycleData['encryptionVersion'] ?? 'N/A';
+      decryptedData['_encryptionVersion'] =
+          tricycleData['encryptionVersion'] ?? 'N/A';
     } else {
       decryptedData['_wasEncrypted'] = false;
     }
-    
+
     return decryptedData;
   }
 
   // Decrypt nested drivers in tricycle data
-  Map<String, dynamic> _decryptNestedDrivers(Map<String, dynamic> tricycleData) {
-    Map<String, dynamic> decryptedData = Map<String, dynamic>.from(tricycleData);
-    
-    if (decryptedData.containsKey('drivers') && decryptedData['drivers'] is Map) {
-      Map<String, dynamic> drivers = Map<String, dynamic>.from(decryptedData['drivers']);
+  Map<String, dynamic> _decryptNestedDrivers(
+    Map<String, dynamic> tricycleData,
+  ) {
+    Map<String, dynamic> decryptedData = Map<String, dynamic>.from(
+      tricycleData,
+    );
+
+    if (decryptedData.containsKey('drivers') &&
+        decryptedData['drivers'] is Map) {
+      Map<String, dynamic> drivers = Map<String, dynamic>.from(
+        decryptedData['drivers'],
+      );
       Map<String, dynamic> decryptedDrivers = {};
-      
+
       drivers.forEach((driverId, driverData) {
         if (driverData is Map) {
-          Map<String, dynamic> driverMap = Map<String, dynamic>.from(driverData);
+          Map<String, dynamic> driverMap = Map<String, dynamic>.from(
+            driverData,
+          );
           decryptedDrivers[driverId] = _decryptDriverData(driverMap);
         }
       });
-      
+
       decryptedData['drivers'] = decryptedDrivers;
     }
-    
+
     return decryptedData;
   }
 
@@ -181,6 +216,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
         _driverData = driverInfo;
         _isLoading = false;
       });
+
+      // NEW: Set driver info for emergency alerts
+      EmergencyDialog.setScannedDriverInfo(driverInfo);
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -256,11 +294,13 @@ class _QRScannerPageState extends State<QRScannerPage> {
     final snapshot = await dbRef.get();
 
     if (snapshot.exists) {
-      Map<String, dynamic> tricycleData = Map<String, dynamic>.from(snapshot.value as Map);
-      
+      Map<String, dynamic> tricycleData = Map<String, dynamic>.from(
+        snapshot.value as Map,
+      );
+
       // Decrypt tricycle data
       tricycleData = _decryptTricycleData(tricycleData);
-      
+
       // Decrypt nested drivers
       tricycleData = _decryptNestedDrivers(tricycleData);
 
@@ -285,6 +325,10 @@ class _QRScannerPageState extends State<QRScannerPage> {
       _isScanning = true;
       _isTricycleExpanded = false;
     });
+
+    // NEW: Clear driver info from emergency alerts when resetting scanner
+    EmergencyDialog.clearScannedDriverInfo();
+
     controller?.resumeCamera();
   }
 
@@ -296,67 +340,151 @@ class _QRScannerPageState extends State<QRScannerPage> {
           children: [
             const Text(
               'Scan Driver QR Code',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-         
-            
           ],
         ),
         iconTheme: const IconThemeData(color: Colors.white),
         backgroundColor: Colors.blue,
+        actions: [
+          // NEW: Emergency Alert Button in App Bar
+          if (_driverData != null)
+            IconButton(
+              icon: Icon(Icons.emergency, color: Colors.red.shade700),
+              onPressed: () async {
+                // Show emergency alert dialog
+                bool alertSent = await EmergencyDialog.showEnhanced(context);
+                if (alertSent) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text('Emergency alert sent with driver information'),
+                        ],
+                      ),
+                      backgroundColor: Colors.green,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              tooltip: 'Send Emergency Alert',
+            ),
+        ],
       ),
       body: Column(
         children: [
-          // Instructions with security notice
+          // Instructions with security notice and driver info status
           _driverData == null
               ? Container(
-                  padding: EdgeInsets.all(16),
-                  color: Colors.blue.shade50,
-                  width: double.infinity,
-                  child: Column(
-                    children: [
-                      Icon(Icons.qr_code_scanner, size: 48, color: Colors.blue),
-                      SizedBox(height: 10),
-                      Text(
-                        'Scan a driver\'s QR code',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                padding: EdgeInsets.all(16),
+                color: Colors.blue.shade50,
+                width: double.infinity,
+                child: Column(
+                  children: [
+                    Icon(Icons.qr_code_scanner, size: 48, color: Colors.blue),
+                    SizedBox(height: 10),
+                    Text(
+                      'Scan a driver\'s QR code',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
-                      SizedBox(height: 5),
-                      Text(
-                        'Position the QR code within the frame to scan',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                    SizedBox(height: 5),
+                    Text(
+                      'Position the QR code within the frame to scan',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                    SizedBox(height: 8),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      SizedBox(height: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade100,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.security, size: 16, color: Colors.green.shade700),
-                            SizedBox(width: 4),
-                            Text(
-                              'Encrypted data will be automatically decrypted',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green.shade700,
-                                fontWeight: FontWeight.w500,
-                              ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.security,
+                            size: 16,
+                            color: Colors.green.shade700,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'Driver info will be included in emergency alerts',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w500,
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+              : // NEW: Driver info status banner
+              Container(
+                padding: EdgeInsets.all(12),
+                color: Colors.green.shade50,
+                width: double.infinity,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green.shade700,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Driver info set for emergency alerts: ${_driverData!['firstName']} ${_driverData!['lastName']}',
+                        style: TextStyle(
+                          color: Colors.green.shade700,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
                         ),
                       ),
-                    ],
-                  ),
-                )
-              : SizedBox.shrink(),
+                    ),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.red.shade300),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.emergency,
+                            size: 12,
+                            color: Colors.red.shade700,
+                          ),
+                          SizedBox(width: 2),
+                          Text(
+                            'EMERGENCY',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
           // Scanner or Results
           Expanded(
@@ -407,7 +535,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Please wait while we process encrypted data',
+                    'Driver info will be available for emergency alerts',
                     style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
@@ -470,6 +598,45 @@ class _QRScannerPageState extends State<QRScannerPage> {
               ),
               SizedBox(height: 40),
 
+              // Emergency Alert Ready Status
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(12),
+                margin: EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.emergency, color: Colors.red.shade600, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Emergency Alert Ready',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                          Text(
+                            'Driver details will be included in emergency SMS',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.red.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
               // Security Status
               if (_driverData!['_wasEncrypted'] == true)
                 Container(
@@ -483,7 +650,11 @@ class _QRScannerPageState extends State<QRScannerPage> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.verified_user, color: Colors.green.shade600, size: 24),
+                      Icon(
+                        Icons.verified_user,
+                        color: Colors.green.shade600,
+                        size: 24,
+                      ),
                       SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -538,12 +709,27 @@ class _QRScannerPageState extends State<QRScannerPage> {
               ),
               SizedBox(height: 30),
 
-              _buildInfoRow('First Name', _driverData!['firstName'] ?? 'N/A', isEncrypted: _driverData!['_wasEncrypted'] == true),
-              _buildInfoRow('Last Name', _driverData!['lastName'] ?? 'N/A', isEncrypted: _driverData!['_wasEncrypted'] == true),
-              _buildInfoRow('License Code', _driverData!['licenseCode'] ?? 'N/A', isEncrypted: _driverData!['_wasEncrypted'] == true),
+              _buildInfoRow(
+                'First Name',
+                _driverData!['firstName'] ?? 'N/A',
+                isEncrypted: _driverData!['_wasEncrypted'] == true,
+              ),
+              _buildInfoRow(
+                'Last Name',
+                _driverData!['lastName'] ?? 'N/A',
+                isEncrypted: _driverData!['_wasEncrypted'] == true,
+              ),
+              _buildInfoRow(
+                'License Code',
+                _driverData!['licenseCode'] ?? 'N/A',
+                isEncrypted: _driverData!['_wasEncrypted'] == true,
+              ),
               _buildInfoRow('Tricycle ID', _driverData!['tricycleId'] ?? 'N/A'),
               if (_driverData!.containsKey('createdAt'))
-                _buildInfoRow('Registered On', _formatDate(_driverData!['createdAt'])),
+                _buildInfoRow(
+                  'Registered On',
+                  _formatDate(_driverData!['createdAt']),
+                ),
 
               // Tricycle Details Section
               if (_tricycleData != null) SizedBox(height: 30),
@@ -580,6 +766,51 @@ class _QRScannerPageState extends State<QRScannerPage> {
                     ),
                   ),
                 ],
+              ),
+
+              // NEW: Emergency Alert Button
+              SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    bool alertSent = await EmergencyDialog.showEnhanced(
+                      context,
+                    );
+                    if (alertSent) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Row(
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Emergency alert sent with driver information',
+                              ),
+                            ],
+                          ),
+                          backgroundColor: Colors.green,
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  },
+                  icon: Icon(Icons.emergency, color: Colors.white),
+                  label: Text(
+                    'Send Emergency Alert',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade600,
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
@@ -623,7 +854,10 @@ class _QRScannerPageState extends State<QRScannerPage> {
                       SizedBox(width: 8),
                       if (_tricycleData!['_wasEncrypted'] == true)
                         Container(
-                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.green.shade100,
                             borderRadius: BorderRadius.circular(3),
@@ -655,60 +889,63 @@ class _QRScannerPageState extends State<QRScannerPage> {
         AnimatedContainer(
           duration: Duration(milliseconds: 300),
           height: _isTricycleExpanded ? null : 0,
-          child: _isTricycleExpanded
-              ? Container(
-                  padding: EdgeInsets.all(16),
-                  margin: EdgeInsets.only(top: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Tricycle Basic Info
-                      if (_tricycleData!.containsKey('plateNumber'))
-                        _buildInfoRow(
-                          'Plate Number',
-                          _tricycleData!['plateNumber'] ?? 'N/A',
-                          isEncrypted: _tricycleData!['_wasEncrypted'] == true,
-                        ),
-                      if (_tricycleData!.containsKey('orCr'))
-                        _buildInfoRow(
-                          'OR/CR',
-                          _tricycleData!['orCr'] ?? 'N/A',
-                          isEncrypted: _tricycleData!['_wasEncrypted'] == true,
-                        ),
-                      if (_tricycleData!.containsKey('createdAt'))
-                        _buildInfoRow(
-                          'Registered On',
-                          _formatDate(_tricycleData!['createdAt']),
-                        ),
-                      if (_tricycleData!['_wasEncrypted'] == true)
-                        _buildInfoRow(
-                          'Encryption Version',
-                          'v${_tricycleData!['_encryptionVersion']}',
-                        ),
+          child:
+              _isTricycleExpanded
+                  ? Container(
+                    padding: EdgeInsets.all(16),
+                    margin: EdgeInsets.only(top: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Tricycle Basic Info
+                        if (_tricycleData!.containsKey('plateNumber'))
+                          _buildInfoRow(
+                            'Plate Number',
+                            _tricycleData!['plateNumber'] ?? 'N/A',
+                            isEncrypted:
+                                _tricycleData!['_wasEncrypted'] == true,
+                          ),
+                        if (_tricycleData!.containsKey('orCr'))
+                          _buildInfoRow(
+                            'OR/CR',
+                            _tricycleData!['orCr'] ?? 'N/A',
+                            isEncrypted:
+                                _tricycleData!['_wasEncrypted'] == true,
+                          ),
+                        if (_tricycleData!.containsKey('createdAt'))
+                          _buildInfoRow(
+                            'Registered On',
+                            _formatDate(_tricycleData!['createdAt']),
+                          ),
+                        if (_tricycleData!['_wasEncrypted'] == true)
+                          _buildInfoRow(
+                            'Encryption Version',
+                            'v${_tricycleData!['_encryptionVersion']}',
+                          ),
 
-                      // Drivers section - shows drivers associated with this tricycle
-                      if (_tricycleData!.containsKey('drivers'))
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16.0),
-                          child: Text(
-                            'Associated Drivers',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                        // Drivers section - shows drivers associated with this tricycle
+                        if (_tricycleData!.containsKey('drivers'))
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16.0),
+                            child: Text(
+                              'Associated Drivers',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
                             ),
                           ),
-                        ),
 
-                      if (_tricycleData!.containsKey('drivers'))
-                        ..._buildDriversList(),
-                    ],
-                  ),
-                )
-              : SizedBox.shrink(),
+                        if (_tricycleData!.containsKey('drivers'))
+                          ..._buildDriversList(),
+                      ],
+                    ),
+                  )
+                  : SizedBox.shrink(),
         ),
       ],
     );
@@ -751,7 +988,11 @@ class _QRScannerPageState extends State<QRScannerPage> {
                         ),
                       ),
                       if (driver['_wasEncrypted'] == true)
-                        Icon(Icons.security, size: 16, color: Colors.green.shade600),
+                        Icon(
+                          Icons.security,
+                          size: 16,
+                          color: Colors.green.shade600,
+                        ),
                     ],
                   ),
                   if (driver.containsKey('licenseCode'))
@@ -781,7 +1022,12 @@ class _QRScannerPageState extends State<QRScannerPage> {
     return driverWidgets;
   }
 
-  Widget _buildInfoRow(String label, String value, {bool isEncrypted = false, bool compact = false}) {
+  Widget _buildInfoRow(
+    String label,
+    String value, {
+    bool isEncrypted = false,
+    bool compact = false,
+  }) {
     return Padding(
       padding: EdgeInsets.only(bottom: compact ? 8.0 : 16.0),
       child: Row(
